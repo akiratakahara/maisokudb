@@ -1,0 +1,58 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  free
+  pro
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  password      String
+  name          String
+  plan          Plan       @default(free)
+  aiUsageCount  Int        @default(0)
+  properties    Property[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Property {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name              String
+  address           String?
+  nearestStation    String?
+  walkMinutes       Int?
+  price             Float?
+  managementFee     Float?
+  repairReserve     Float?
+  deposit           Float?
+  keyMoney          Float?
+  layout            String?
+  area              Float?
+  balconyArea       Float?
+  builtDate         String?
+  structure         String?
+  floors            String?
+  floor             String?
+  equipment         Json?
+  transactionType   String?
+  managementCompany String?
+  contactInfo       String?
+  notes             String?
+  pdfUrl            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+}
