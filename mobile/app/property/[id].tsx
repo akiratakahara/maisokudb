@@ -8,36 +8,61 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
-  Modal,
   Share,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { api, Property } from "@/lib/api";
+import { File } from "expo-file-system";
+import { api, Property, PropertyAnalysis } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const FIELD_CONFIG: { key: keyof Property; label: string }[] = [
   { key: "name", label: "物件名" },
+  { key: "price", label: "価格（万円）" },
+  { key: "grossYield", label: "表面利回り（%）" },
+  { key: "monthlyRent", label: "月額賃料（円）" },
+  { key: "managementFee", label: "管理費（円/月）" },
+  { key: "repairReserve", label: "修繕積立金（円/月）" },
+  { key: "otherMonthlyExpenses", label: "その他月額費用（円/月）" },
+  { key: "builtDate", label: "築年月" },
+  { key: "structure", label: "構造" },
+  { key: "area", label: "専有面積（㎡）" },
+  { key: "totalUnits", label: "総戸数" },
+  { key: "prefecture", label: "都道府県" },
+  { key: "city", label: "市区町村" },
   { key: "address", label: "所在地" },
   { key: "nearestStation", label: "最寄駅" },
   { key: "walkMinutes", label: "徒歩分数" },
-  { key: "price", label: "価格（万円）" },
-  { key: "managementFee", label: "管理費（円）" },
-  { key: "repairReserve", label: "修繕積立金（円）" },
-  { key: "deposit", label: "敷金（円）" },
-  { key: "keyMoney", label: "礼金（円）" },
   { key: "layout", label: "間取り" },
-  { key: "area", label: "専有面積（㎡）" },
-  { key: "balconyArea", label: "バルコニー面積（㎡）" },
-  { key: "builtDate", label: "築年月" },
-  { key: "structure", label: "構造" },
   { key: "floors", label: "建物階数" },
   { key: "floor", label: "所在階" },
-  { key: "transactionType", label: "取引態様" },
+  { key: "balconyArea", label: "バルコニー面積（㎡）" },
+  { key: "sublease", label: "サブリース" },
+  { key: "subleaseDetail", label: "サブリース詳細" },
   { key: "managementCompany", label: "管理会社" },
+  { key: "transactionType", label: "取引態様" },
   { key: "contactInfo", label: "連絡先" },
   { key: "notes", label: "備考" },
 ];
+
+const SCORE_LABELS: Record<string, string> = {
+  location: "立地",
+  profitability: "収益性",
+  growth: "将来性",
+  liquidity: "流動性",
+};
+
+function ScoreBar({ label, value }: { label: string; value: number }) {
+  return (
+    <View style={styles.scoreRow}>
+      <Text style={styles.scoreLabel}>{label}</Text>
+      <View style={styles.scoreBarBg}>
+        <View style={[styles.scoreBarFill, { width: `${(value / 5) * 100}%` }]} />
+      </View>
+      <Text style={styles.scoreValue}>{value}/5</Text>
+    </View>
+  );
+}
 
 export default function PropertyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -46,9 +71,10 @@ export default function PropertyDetailScreen() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [emailModalVisible, setEmailModalVisible] = useState(false);
-  const [emailText, setEmailText] = useState("");
-  const [emailLoading, setEmailLoading] = useState(false);
+  // AI分析
+  const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisExpanded, setAnalysisExpanded] = useState(false);
 
   useEffect(() => {
     fetchProperty();
@@ -69,16 +95,84 @@ export default function PropertyDetailScreen() {
   function initEditData(p: Property) {
     const data: Record<string, string> = {};
     for (const { key } of FIELD_CONFIG) {
-      const val = p[key];
-      data[key as string] = val !== null && val !== undefined ? String(val) : "";
+      if (key === "sublease") {
+        data[key] = p.sublease === true ? "あり" : p.sublease === false ? "なし" : "";
+      } else {
+        const val = p[key];
+        data[key as string] = val !== null && val !== undefined ? String(val) : "";
+      }
     }
     setEditData(data);
+  }
+
+  async function handleAnalysis() {
+    if (!property) return;
+    setAnalysisLoading(true);
+    setAnalysisExpanded(true);
+    try {
+      const result = await api.analyzeProperty({
+        name: property.name || undefined,
+        prefecture: property.prefecture || undefined,
+        city: property.city || undefined,
+        address: property.address || undefined,
+        nearestStation: property.nearestStation || undefined,
+        walkMinutes: property.walkMinutes || undefined,
+        price: property.price || undefined,
+        monthlyRent: property.monthlyRent || undefined,
+        grossYield: property.grossYield || undefined,
+        managementFee: property.managementFee || undefined,
+        repairReserve: property.repairReserve || undefined,
+        area: property.area || undefined,
+        structure: property.structure || undefined,
+        builtDate: property.builtDate || undefined,
+        layout: property.layout || undefined,
+        totalUnits: property.totalUnits || undefined,
+        floor: property.floor || undefined,
+        floors: property.floors || undefined,
+      });
+      setAnalysis(result);
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : "分析に失敗しました");
+    } finally {
+      setAnalysisLoading(false);
+    }
   }
 
   async function handleSave() {
     setSaving(true);
     try {
-      const res = await api.updateProperty(id, editData as unknown as Partial<Property>);
+      const toNum = (v: string) => { const n = Number(v); return v && !isNaN(n) ? n : null; };
+      const body: Partial<Property> = {
+        name: editData.name || "",
+        prefecture: editData.prefecture || null,
+        city: editData.city || null,
+        address: editData.address || null,
+        nearestStation: editData.nearestStation || null,
+        walkMinutes: toNum(editData.walkMinutes),
+        price: toNum(editData.price),
+        grossYield: toNum(editData.grossYield),
+        monthlyRent: toNum(editData.monthlyRent),
+        managementFee: toNum(editData.managementFee),
+        repairReserve: toNum(editData.repairReserve),
+        otherMonthlyExpenses: toNum(editData.otherMonthlyExpenses),
+        layout: editData.layout || null,
+        area: toNum(editData.area),
+        balconyArea: toNum(editData.balconyArea),
+        builtDate: editData.builtDate || null,
+        structure: editData.structure || null,
+        floors: editData.floors || null,
+        floor: editData.floor || null,
+        totalUnits: toNum(editData.totalUnits),
+        transactionType: editData.transactionType || null,
+        sublease: editData.sublease === "あり" ? true : editData.sublease === "なし" ? false : null,
+        subleaseDetail: editData.subleaseDetail || null,
+        managementCompany: editData.managementCompany || null,
+        contactInfo: editData.contactInfo || null,
+        notes: editData.notes || null,
+        equipment: property?.equipment || null,
+        pdfUrl: property?.pdfUrl || null,
+      };
+      const res = await api.updateProperty(id, body);
       setProperty(res.property);
       initEditData(res.property);
       setEditing(false);
@@ -109,24 +203,17 @@ export default function PropertyDetailScreen() {
     ]);
   }
 
-  async function handleGenerateEmail() {
-    setEmailLoading(true);
-    setEmailModalVisible(true);
+  async function handleViewPdf() {
+    if (!property?.pdfUrl) return;
     try {
-      const res = await api.generateEmail(id);
-      setEmailText(res.email);
+      const pdfFile = new File(property.pdfUrl);
+      if (!pdfFile.exists) {
+        Alert.alert("エラー", "PDFファイルが見つかりません。削除された可能性があります。");
+        return;
+      }
+      await Share.share({ url: property.pdfUrl });
     } catch (e) {
-      setEmailText("");
-      Alert.alert("エラー", e instanceof Error ? e.message : "メール生成に失敗しました");
-      setEmailModalVisible(false);
-    } finally {
-      setEmailLoading(false);
-    }
-  }
-
-  async function handleShareEmail() {
-    if (emailText) {
-      await Share.share({ message: emailText });
+      Alert.alert("エラー", "PDFを開けませんでした");
     }
   }
 
@@ -154,6 +241,27 @@ export default function PropertyDetailScreen() {
         <Text style={styles.headerPrice}>
           {property.price ? `${property.price}万円` : "価格未定"}
         </Text>
+
+        {/* 利回り表示 */}
+        {property.price && property.price > 0 && (
+          <View style={styles.yieldRow}>
+            {property.grossYield != null && (
+              <View style={styles.yieldItem}>
+                <Text style={styles.yieldLabel}>表面利回り</Text>
+                <Text style={styles.yieldValue}>{property.grossYield.toFixed(2)}%</Text>
+              </View>
+            )}
+            {property.monthlyRent != null && (
+              <View style={styles.yieldItem}>
+                <Text style={styles.yieldLabel}>実質利回り</Text>
+                <Text style={[styles.yieldValue, styles.yieldValueNet]}>
+                  {(((property.monthlyRent - (property.managementFee || 0) - (property.repairReserve || 0) - (property.otherMonthlyExpenses || 0)) * 12) / (property.price * 10000) * 100).toFixed(2)}%
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+
         <View style={styles.headerBadges}>
           {property.layout && (
             <View style={styles.badge}>
@@ -180,6 +288,16 @@ export default function PropertyDetailScreen() {
             </Text>
           </View>
         )}
+        {property.stationDailyPassengers != null && property.stationDailyPassengers > 0 && (
+          <Text style={styles.passengerText}>
+            乗降客数 {property.stationDailyPassengers.toLocaleString()}人/日
+          </Text>
+        )}
+        {property.stationLines && property.stationLines.length > 0 && (
+          <Text style={styles.stationLinesText}>
+            {property.stationLines.join(" / ")}
+          </Text>
+        )}
       </View>
 
       {/* Action Buttons */}
@@ -205,19 +323,187 @@ export default function PropertyDetailScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.actionButton}
-          onPress={handleGenerateEmail}
-        >
-          <FontAwesome name="envelope" size={16} color={theme.text} />
-          <Text style={styles.actionText}>紹介メール生成</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={[styles.actionButton, styles.deleteButton]}
           onPress={handleDelete}
         >
           <FontAwesome name="trash" size={16} color={theme.accent} />
         </TouchableOpacity>
       </View>
+
+      {/* マイソクPDF表示ボタン */}
+      {property?.pdfUrl && (
+        <TouchableOpacity style={styles.pdfButton} onPress={handleViewPdf}>
+          <FontAwesome name="file-pdf-o" size={18} color={theme.accent} />
+          <Text style={styles.pdfButtonText}>マイソクPDFを表示</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* シミュレーションボタン */}
+      {property && property.price && (
+        <TouchableOpacity
+          style={styles.simulationButton}
+          onPress={() => {
+            router.push({
+              pathname: "/(tabs)/simulation",
+              params: {
+                property_price: String((property.price || 0) * 10000),
+                monthly_rent: String(property.monthlyRent || 0),
+                management_fee: String(property.managementFee || 0),
+                repair_reserve: String(property.repairReserve || 0),
+                other_monthly_expenses: String(property.otherMonthlyExpenses || 0),
+                built_year: property.builtDate?.match(/(\d{4})/)?.[1] || "",
+                structure: property.structure || "RC造",
+                exclusive_area: String(property.area || 0),
+                total_units: String(property.totalUnits || 30),
+              },
+            });
+          }}
+        >
+          <FontAwesome name="calculator" size={18} color="#fff" />
+          <Text style={styles.simulationButtonText}>収益シミュレーション</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* AI分析ボタン */}
+      <TouchableOpacity
+        style={[styles.analysisButton, analysisLoading && styles.buttonDisabled]}
+        onPress={handleAnalysis}
+        disabled={analysisLoading}
+      >
+        {analysisLoading ? (
+          <>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={styles.analysisButtonText}>分析中...</Text>
+          </>
+        ) : (
+          <>
+            <FontAwesome name="bar-chart" size={18} color={theme.accent} />
+            <Text style={styles.analysisButtonText}>
+              {analysis ? "AI投資分析を再実行" : "AI投資分析"}
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
+
+      {/* AI分析結果 */}
+      {analysis && analysisExpanded && (
+        <View style={styles.analysisCard}>
+          <TouchableOpacity
+            style={styles.analysisTitleRow}
+            onPress={() => setAnalysisExpanded(!analysisExpanded)}
+          >
+            <FontAwesome name="bar-chart" size={14} color={theme.accent} />
+            <Text style={styles.analysisSectionTitle}>AI投資分析</Text>
+            <FontAwesome
+              name={analysisExpanded ? "chevron-up" : "chevron-down"}
+              size={12}
+              color={theme.textMuted}
+            />
+          </TouchableOpacity>
+
+          {/* 総合評価 */}
+          <View style={styles.analysisSummaryBox}>
+            <Text style={styles.analysisSummary}>{analysis.summary}</Text>
+          </View>
+
+          {/* スコア */}
+          {analysis.score && (
+            <View style={styles.analysisScoreBox}>
+              {Object.entries(SCORE_LABELS).map(([key, label]) => (
+                <ScoreBar
+                  key={key}
+                  label={label}
+                  value={analysis.score[key as keyof typeof analysis.score] || 3}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* ポジティブ/リスク */}
+          {analysis.positive_points && analysis.positive_points.length > 0 && (
+            <View style={styles.analysisPointsBox}>
+              <Text style={styles.analysisPointsTitle}>
+                <FontAwesome name="check-circle" size={13} color="#4CAF50" /> ポジティブ要因
+              </Text>
+              {analysis.positive_points.map((p, i) => (
+                <Text key={i} style={styles.analysisPoint}>  {p}</Text>
+              ))}
+            </View>
+          )}
+          {analysis.risk_points && analysis.risk_points.length > 0 && (
+            <View style={[styles.analysisPointsBox, styles.analysisRiskBox]}>
+              <Text style={styles.analysisRiskTitle}>
+                <FontAwesome name="exclamation-triangle" size={13} color="#FF9800" /> リスク要因
+              </Text>
+              {analysis.risk_points.map((p, i) => (
+                <Text key={i} style={styles.analysisPoint}>  {p}</Text>
+              ))}
+            </View>
+          )}
+
+          {/* 詳細分析 */}
+          {analysis.land_price_analysis && (
+            <View style={styles.analysisDetailRow}>
+              <Text style={styles.analysisDetailLabel}>地価トレンド</Text>
+              <Text style={styles.analysisDetailText}>{analysis.land_price_analysis}</Text>
+            </View>
+          )}
+          {analysis.area_analysis && (
+            <View style={styles.analysisDetailRow}>
+              <Text style={styles.analysisDetailLabel}>エリア評価</Text>
+              <Text style={styles.analysisDetailText}>{analysis.area_analysis}</Text>
+            </View>
+          )}
+          {analysis.station_analysis && (
+            <View style={styles.analysisDetailRow}>
+              <Text style={styles.analysisDetailLabel}>駅力評価</Text>
+              <Text style={styles.analysisDetailText}>{analysis.station_analysis}</Text>
+            </View>
+          )}
+          {analysis.rent_assessment && (
+            <View style={styles.analysisDetailRow}>
+              <Text style={styles.analysisDetailLabel}>賃料評価</Text>
+              <Text style={styles.analysisDetailText}>{analysis.rent_assessment}</Text>
+            </View>
+          )}
+
+          {/* 公的データ概要 */}
+          {analysis.public_data?.land_price && (
+            <View style={styles.publicDataBox}>
+              <Text style={styles.publicDataTitle}>周辺地価データ</Text>
+              <Text style={styles.publicDataText}>
+                平均地価: {analysis.public_data.land_price.avg_price.toLocaleString()}円/㎡
+                {analysis.public_data.land_price.avg_rate != null &&
+                  ` (前年比${analysis.public_data.land_price.avg_rate > 0 ? "+" : ""}${analysis.public_data.land_price.avg_rate}%)`}
+              </Text>
+              {analysis.public_data.land_price.trend_5y != null && (
+                <Text style={styles.publicDataText}>
+                  5年変動: {analysis.public_data.land_price.trend_5y > 0 ? "+" : ""}{analysis.public_data.land_price.trend_5y}%
+                  {analysis.public_data.land_price.trend_10y != null &&
+                    ` / 10年変動: ${analysis.public_data.land_price.trend_10y > 0 ? "+" : ""}${analysis.public_data.land_price.trend_10y}%`}
+                </Text>
+              )}
+            </View>
+          )}
+          {analysis.public_data?.did && (
+            <View style={styles.publicDataBox}>
+              <Text style={styles.publicDataTitle}>DID（人口集中地区）</Text>
+              <Text style={[
+                styles.publicDataText,
+                { color: analysis.public_data.did.in_did ? "#4CAF50" : "#FF9800" },
+              ]}>
+                {analysis.public_data.did.in_did
+                  ? `DID内 - ${analysis.public_data.did.municipality} (人口密度: ${analysis.public_data.did.density?.toLocaleString()}人/km²)`
+                  : "DID外（郊外エリア）"}
+              </Text>
+            </View>
+          )}
+
+          <Text style={styles.analysisDisclaimer}>
+            * 国土交通省 地価公示・国勢調査DID・国土数値情報に基づくAI分析です。投資判断は自己責任で行ってください。
+          </Text>
+        </View>
+      )}
 
       {/* Detail Fields */}
       <View style={styles.fieldsCard}>
@@ -236,9 +522,11 @@ export default function PropertyDetailScreen() {
               />
             ) : (
               <Text style={styles.fieldValue}>
-                {property[key] !== null && property[key] !== undefined
-                  ? String(property[key])
-                  : "—"}
+                {key === "sublease"
+                  ? property.sublease === true ? "あり" : property.sublease === false ? "なし" : "—"
+                  : property[key] !== null && property[key] !== undefined
+                    ? String(property[key])
+                    : "—"}
               </Text>
             )}
           </View>
@@ -276,48 +564,6 @@ export default function PropertyDetailScreen() {
           )}
         </TouchableOpacity>
       )}
-
-      {/* Email Modal */}
-      <Modal
-        visible={emailModalVisible}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setEmailModalVisible(false)}
-      >
-        <View style={styles.emailOverlay}>
-          <View style={styles.emailContent}>
-            <View style={styles.emailHeader}>
-              <Text style={styles.emailTitle}>紹介メール</Text>
-              <TouchableOpacity onPress={() => setEmailModalVisible(false)}>
-                <FontAwesome name="times" size={20} color={theme.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            {emailLoading ? (
-              <View style={styles.emailLoading}>
-                <ActivityIndicator size="large" color={theme.accent} />
-                <Text style={styles.emailLoadingText}>
-                  AIがメールを生成中...
-                </Text>
-              </View>
-            ) : (
-              <>
-                <ScrollView style={styles.emailScroll}>
-                  <Text style={styles.emailBody} selectable>
-                    {emailText}
-                  </Text>
-                </ScrollView>
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={handleShareEmail}
-                >
-                  <FontAwesome name="share" size={16} color="#fff" />
-                  <Text style={styles.shareText}>共有</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -345,6 +591,28 @@ const styles = StyleSheet.create({
     color: theme.text,
     marginBottom: 6,
   },
+  yieldRow: {
+    flexDirection: "row",
+    gap: 16,
+    marginBottom: 10,
+  },
+  yieldItem: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+  },
+  yieldLabel: {
+    fontSize: 12,
+    color: theme.textSecondary,
+  },
+  yieldValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.accent,
+  },
+  yieldValueNet: {
+    color: theme.success,
+  },
   headerPrice: {
     fontSize: 24,
     fontWeight: "bold",
@@ -370,6 +638,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   stationText: { fontSize: 13, color: theme.textSecondary },
+  passengerText: { fontSize: 12, color: theme.accent, marginTop: 4 },
+  stationLinesText: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
   actionRow: {
     flexDirection: "row",
     gap: 8,
@@ -393,6 +663,183 @@ const styles = StyleSheet.create({
     borderColor: theme.accent,
   },
   actionText: { fontSize: 13, color: theme.text },
+  pdfButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: theme.bgCard,
+    paddingVertical: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: theme.accent,
+  },
+  pdfButtonText: {
+    color: theme.accent,
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+  simulationButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: theme.accent,
+    paddingVertical: 14,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  simulationButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+  // AI分析ボタン
+  analysisButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: theme.bgCard,
+    paddingVertical: 14,
+    borderRadius: 10,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(33, 150, 243, 0.3)",
+  },
+  analysisButtonText: {
+    color: theme.accent,
+    fontSize: 15,
+    fontWeight: "bold",
+  },
+  // AI分析結果カード
+  analysisCard: {
+    backgroundColor: theme.bgCard,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(33, 150, 243, 0.2)",
+  },
+  analysisTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  analysisSectionTitle: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: theme.accent,
+    flex: 1,
+  },
+  analysisSummaryBox: {
+    backgroundColor: "rgba(33, 150, 243, 0.08)",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  analysisSummary: {
+    fontSize: 14,
+    color: theme.text,
+    lineHeight: 22,
+  },
+  analysisScoreBox: {
+    marginBottom: 12,
+  },
+  scoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  scoreLabel: {
+    width: 50,
+    fontSize: 12,
+    color: theme.textSecondary,
+  },
+  scoreBarBg: {
+    flex: 1,
+    height: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 4,
+    marginHorizontal: 8,
+  },
+  scoreBarFill: {
+    height: 8,
+    backgroundColor: theme.accent,
+    borderRadius: 4,
+  },
+  scoreValue: {
+    width: 30,
+    fontSize: 12,
+    color: theme.textSecondary,
+    textAlign: "right",
+  },
+  analysisPointsBox: {
+    backgroundColor: "rgba(76, 175, 80, 0.08)",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 8,
+  },
+  analysisRiskBox: {
+    backgroundColor: "rgba(255, 152, 0, 0.08)",
+  },
+  analysisPointsTitle: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: "#4CAF50",
+    marginBottom: 4,
+  },
+  analysisRiskTitle: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: "#FF9800",
+    marginBottom: 4,
+  },
+  analysisPoint: {
+    fontSize: 13,
+    color: theme.text,
+    lineHeight: 20,
+  },
+  analysisDetailRow: {
+    marginBottom: 8,
+  },
+  analysisDetailLabel: {
+    fontSize: 11,
+    color: theme.accent,
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  analysisDetailText: {
+    fontSize: 13,
+    color: theme.text,
+    lineHeight: 20,
+  },
+  publicDataBox: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+  },
+  publicDataTitle: {
+    fontSize: 11,
+    color: theme.textMuted,
+    fontWeight: "bold",
+    marginBottom: 4,
+  },
+  publicDataText: {
+    fontSize: 12,
+    color: theme.textSecondary,
+    lineHeight: 18,
+  },
+  analysisDisclaimer: {
+    fontSize: 10,
+    color: theme.textMuted,
+    marginTop: 10,
+    lineHeight: 14,
+  },
+  // フィールド
   fieldsCard: {
     backgroundColor: theme.bgCard,
     borderRadius: 14,
@@ -445,55 +892,4 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   saveText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
-  emailOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    justifyContent: "flex-end",
-  },
-  emailContent: {
-    backgroundColor: theme.bgCard,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: "80%",
-  },
-  emailHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  emailTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: theme.text,
-  },
-  emailLoading: {
-    alignItems: "center",
-    paddingVertical: 40,
-    gap: 16,
-  },
-  emailLoadingText: {
-    fontSize: 14,
-    color: theme.textSecondary,
-  },
-  emailScroll: {
-    maxHeight: 400,
-  },
-  emailBody: {
-    fontSize: 14,
-    color: theme.text,
-    lineHeight: 22,
-  },
-  shareButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: theme.accent,
-    borderRadius: 10,
-    paddingVertical: 14,
-    marginTop: 16,
-  },
-  shareText: { color: "#fff", fontSize: 15, fontWeight: "bold" },
 });
