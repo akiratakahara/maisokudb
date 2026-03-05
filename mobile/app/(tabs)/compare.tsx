@@ -18,6 +18,8 @@ import { theme } from "@/constants/Colors";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CHART_SIZE = SCREEN_WIDTH - 48;
+const CHART_H = Math.round(CHART_SIZE * 0.7);
+const Y_LABEL_W = 20;
 
 const AXIS_OPTIONS = [
   { label: "価格（万円）", key: "price" },
@@ -165,8 +167,20 @@ export default function CompareScreen() {
       <View style={styles.chartContainer}>
         {/* Y軸ラベル（左側・縦向き） + チャート */}
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          <View style={styles.yAxisLabelContainer}>
-            <Text style={styles.yAxisLabel}>{getAxisLabel(yAxis)}</Text>
+          {/* Y軸ラベル: コンテナごと rotate して確実に縦置き */}
+          <View style={{ width: Y_LABEL_W, height: CHART_H, overflow: "visible" }}>
+            <View style={{
+              position: "absolute",
+              width: CHART_H,
+              height: Y_LABEL_W,
+              left: (Y_LABEL_W - CHART_H) / 2,
+              top: (CHART_H - Y_LABEL_W) / 2,
+              justifyContent: "center",
+              alignItems: "center",
+              transform: [{ rotate: "-90deg" }],
+            }}>
+              <Text style={styles.yAxisLabel}>{getAxisLabel(yAxis)}</Text>
+            </View>
           </View>
           <View style={styles.chart}>
             {/* Grid lines */}
@@ -416,24 +430,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  yAxisLabelContainer: {
-    width: 20,
-    height: CHART_SIZE * 0.7,
-    position: "relative",
-  },
   yAxisLabel: {
-    position: "absolute",
-    width: CHART_SIZE * 0.7,
     fontSize: 10,
     color: theme.textSecondary,
     textAlign: "center",
-    top: CHART_SIZE * 0.7 / 2 - 7,
-    left: -(CHART_SIZE * 0.7 / 2) + 10,
-    transform: [{ rotate: "-90deg" }],
   },
   chart: {
-    width: CHART_SIZE - 24,
-    height: CHART_SIZE * 0.7,
+    width: CHART_SIZE - Y_LABEL_W - 4,
+    height: CHART_H,
     backgroundColor: theme.bgCard,
     borderRadius: 12,
     borderWidth: 1,
@@ -481,7 +485,7 @@ const styles = StyleSheet.create({
     color: theme.textSecondary,
     marginTop: 4,
     textAlign: "center",
-    width: CHART_SIZE - 24,
+    width: CHART_SIZE - Y_LABEL_W - 4,
     alignSelf: "flex-end",
   },
   compareSection: {
