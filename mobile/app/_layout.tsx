@@ -1,9 +1,10 @@
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useFonts } from "expo-font";
-import { Stack } from "expo-router";
+import { Stack, router } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
+import { TouchableOpacity } from "react-native";
 import { AuthProvider } from "@/lib/auth-context";
 import { theme } from "@/constants/Colors";
 
@@ -53,7 +54,17 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="property/[id]"
-          options={{ title: "物件詳細" }}
+          options={{
+            title: "物件詳細",
+            headerLeft: () => (
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={{ paddingRight: 16, paddingVertical: 8 }}
+              >
+                <FontAwesome name="chevron-left" size={18} color={theme.text} />
+              </TouchableOpacity>
+            ),
+          }}
         />
       </Stack>
     </AuthProvider>

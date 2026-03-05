@@ -13,7 +13,7 @@ import {
 import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { File } from "expo-file-system";
-import { api, Property, PropertyAnalysis } from "@/lib/api";
+import { api, Property, PropertyAnalysis, LandPricePoint } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const FIELD_CONFIG: { key: keyof Property; label: string }[] = [
@@ -111,28 +111,29 @@ export default function PropertyDetailScreen() {
     setAnalysisExpanded(true);
     try {
       const result = await api.analyzeProperty({
-        name: property.name || undefined,
-        prefecture: property.prefecture || undefined,
-        city: property.city || undefined,
-        address: property.address || undefined,
-        nearestStation: property.nearestStation || undefined,
-        walkMinutes: property.walkMinutes || undefined,
-        price: property.price || undefined,
-        monthlyRent: property.monthlyRent || undefined,
-        grossYield: property.grossYield || undefined,
-        managementFee: property.managementFee || undefined,
-        repairReserve: property.repairReserve || undefined,
-        area: property.area || undefined,
-        structure: property.structure || undefined,
-        builtDate: property.builtDate || undefined,
-        layout: property.layout || undefined,
-        totalUnits: property.totalUnits || undefined,
-        floor: property.floor || undefined,
-        floors: property.floors || undefined,
+        name: property.name ?? undefined,
+        prefecture: property.prefecture ?? undefined,
+        city: property.city ?? undefined,
+        address: property.address ?? undefined,
+        nearestStation: property.nearestStation ?? undefined,
+        walkMinutes: property.walkMinutes ?? undefined,
+        price: property.price ?? undefined,
+        monthlyRent: property.monthlyRent ?? undefined,
+        grossYield: property.grossYield ?? undefined,
+        managementFee: property.managementFee ?? undefined,
+        repairReserve: property.repairReserve ?? undefined,
+        area: property.area ?? undefined,
+        structure: property.structure ?? undefined,
+        builtDate: property.builtDate ?? undefined,
+        layout: property.layout ?? undefined,
+        totalUnits: property.totalUnits ?? undefined,
+        floor: property.floor ?? undefined,
+        floors: property.floors ?? undefined,
       });
       setAnalysis(result);
     } catch (e) {
-      Alert.alert("エラー", e instanceof Error ? e.message : "分析に失敗しました");
+      console.error("Analysis error:", e);
+      Alert.alert("分析エラー", e instanceof Error ? e.message : "分析に失敗しました。ネットワーク接続を確認してください。");
     } finally {
       setAnalysisLoading(false);
     }
@@ -234,7 +235,7 @@ export default function PropertyDetailScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {/* Header Card */}
       <View style={styles.headerCard}>
         <Text style={styles.headerName}>{property.name}</Text>
@@ -364,26 +365,26 @@ export default function PropertyDetailScreen() {
         </TouchableOpacity>
       )}
 
-      {/* AI分析ボタン */}
-      <TouchableOpacity
-        style={[styles.analysisButton, analysisLoading && styles.buttonDisabled]}
-        onPress={handleAnalysis}
-        disabled={analysisLoading}
-      >
-        {analysisLoading ? (
-          <>
-            <ActivityIndicator size="small" color={theme.accent} />
-            <Text style={styles.analysisButtonText}>分析中...</Text>
-          </>
-        ) : (
-          <>
-            <FontAwesome name="bar-chart" size={18} color={theme.accent} />
-            <Text style={styles.analysisButtonText}>
-              {analysis ? "AI投資分析を再実行" : "AI投資分析"}
-            </Text>
-          </>
-        )}
-      </TouchableOpacity>
+      {/* AI分析ボタン / ローディング表示 */}
+      {analysisLoading ? (
+        <View style={styles.analysisLoadingCard}>
+          <ActivityIndicator size="large" color={theme.accent} />
+          <Text style={styles.analysisLoadingTitle}>AI分析中...</Text>
+          <Text style={styles.analysisLoadingDesc}>
+            地価公示・DID・駅データと照合しています（15-30秒）
+          </Text>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={styles.analysisButton}
+          onPress={handleAnalysis}
+        >
+          <FontAwesome name="bar-chart" size={18} color={theme.accent} />
+          <Text style={styles.analysisButtonText}>
+            {analysis ? "AI投資分析を再実行" : "AI投資分析"}
+          </Text>
+        </TouchableOpacity>
+      )}
 
       {/* AI分析結果 */}
       {analysis && analysisExpanded && (
@@ -467,35 +468,133 @@ export default function PropertyDetailScreen() {
             </View>
           )}
 
-          {/* 公的データ概要 */}
-          {analysis.public_data?.land_price && (
-            <View style={styles.publicDataBox}>
-              <Text style={styles.publicDataTitle}>周辺地価データ</Text>
-              <Text style={styles.publicDataText}>
-                平均地価: {analysis.public_data.land_price.avg_price.toLocaleString()}円/㎡
-                {analysis.public_data.land_price.avg_rate != null &&
-                  ` (前年比${analysis.public_data.land_price.avg_rate > 0 ? "+" : ""}${analysis.public_data.land_price.avg_rate}%)`}
+          {/* 参照データ: 駅マスター */}
+          {analysis.reference_data?.station && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                <FontAwesome name="database" size={11} color={theme.textMuted} /> 参照: 駅マスター（国土数値情報S12）
               </Text>
-              {analysis.public_data.land_price.trend_5y != null && (
-                <Text style={styles.publicDataText}>
-                  5年変動: {analysis.public_data.land_price.trend_5y > 0 ? "+" : ""}{analysis.public_data.land_price.trend_5y}%
-                  {analysis.public_data.land_price.trend_10y != null &&
-                    ` / 10年変動: ${analysis.public_data.land_price.trend_10y > 0 ? "+" : ""}${analysis.public_data.land_price.trend_10y}%`}
-                </Text>
-              )}
+              <View style={styles.refDataTable}>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>駅名</Text>
+                  <Text style={styles.refDataVal}>{analysis.reference_data.station.name}</Text>
+                </View>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>乗降客数</Text>
+                  <Text style={styles.refDataVal}>
+                    {analysis.reference_data.station.daily_passengers?.toLocaleString() ?? "—"}人/日
+                  </Text>
+                </View>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>路線</Text>
+                  <Text style={styles.refDataVal}>
+                    {analysis.reference_data.station.lines.map(l => `${l.operator} ${l.line}`).join("\n")}
+                  </Text>
+                </View>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>座標</Text>
+                  <Text style={styles.refDataVal}>
+                    {analysis.reference_data.station.lat.toFixed(5)}, {analysis.reference_data.station.lng.toFixed(5)}
+                  </Text>
+                </View>
+              </View>
             </View>
           )}
-          {analysis.public_data?.did && (
-            <View style={styles.publicDataBox}>
-              <Text style={styles.publicDataTitle}>DID（人口集中地区）</Text>
-              <Text style={[
-                styles.publicDataText,
-                { color: analysis.public_data.did.in_did ? "#4CAF50" : "#FF9800" },
-              ]}>
-                {analysis.public_data.did.in_did
-                  ? `DID内 - ${analysis.public_data.did.municipality} (人口密度: ${analysis.public_data.did.density?.toLocaleString()}人/km²)`
-                  : "DID外（郊外エリア）"}
+
+          {/* 参照データ: DID */}
+          {analysis.reference_data?.did && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                <FontAwesome name="database" size={11} color={theme.textMuted} /> 参照: DID 人口集中地区（国勢調査A16）
               </Text>
+              <View style={styles.refDataTable}>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>判定</Text>
+                  <Text style={[styles.refDataVal, {
+                    color: analysis.reference_data.did.in_did ? "#4CAF50" : "#FF9800",
+                    fontWeight: "bold",
+                  }]}>
+                    {analysis.reference_data.did.in_did ? "DID内（人口集中地区）" : "DID外（郊外エリア）"}
+                  </Text>
+                </View>
+                {analysis.reference_data.did.in_did && (
+                  <>
+                    <View style={styles.refDataRow}>
+                      <Text style={styles.refDataKey}>自治体</Text>
+                      <Text style={styles.refDataVal}>{analysis.reference_data.did.municipality}</Text>
+                    </View>
+                    <View style={styles.refDataRow}>
+                      <Text style={styles.refDataKey}>人口密度</Text>
+                      <Text style={styles.refDataVal}>{analysis.reference_data.did.density?.toLocaleString()}人/km²</Text>
+                    </View>
+                    <View style={styles.refDataRow}>
+                      <Text style={styles.refDataKey}>DID内人口</Text>
+                      <Text style={styles.refDataVal}>{analysis.reference_data.did.population?.toLocaleString()}人</Text>
+                    </View>
+                    <View style={styles.refDataRow}>
+                      <Text style={styles.refDataKey}>世帯数</Text>
+                      <Text style={styles.refDataVal}>{analysis.reference_data.did.households?.toLocaleString()}世帯</Text>
+                    </View>
+                  </>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* 参照データ: 地価公示 */}
+          {analysis.reference_data?.land_price_points && analysis.reference_data.land_price_points.length > 0 && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                <FontAwesome name="database" size={11} color={theme.textMuted} /> 参照: 地価公示（国土交通省L02, {analysis.reference_data.land_price_points.length}地点）
+              </Text>
+              {analysis.reference_data.land_price_points.map((pt, idx) => (
+                <View key={idx} style={styles.refLandPriceCard}>
+                  <View style={styles.refLandPriceHeader}>
+                    <Text style={styles.refLandPriceAddr} numberOfLines={1}>
+                      {idx + 1}. {pt.addr}
+                    </Text>
+                    <Text style={styles.refLandPriceDist}>{pt.distance_m}m</Text>
+                  </View>
+                  <View style={styles.refLandPriceRow}>
+                    <Text style={styles.refLandPriceLabel}>地価</Text>
+                    <Text style={styles.refLandPriceValue}>{pt.price.toLocaleString()}円/㎡</Text>
+                    {pt.rate != null && (
+                      <Text style={[
+                        styles.refLandPriceRate,
+                        { color: pt.rate >= 0 ? "#4CAF50" : "#F44336" },
+                      ]}>
+                        {pt.rate > 0 ? "+" : ""}{pt.rate}%
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.refLandPriceRow}>
+                    <Text style={styles.refLandPriceLabel}>用途</Text>
+                    <Text style={styles.refLandPriceMeta}>{pt.use}</Text>
+                    <Text style={styles.refLandPriceLabel}>地域</Text>
+                    <Text style={styles.refLandPriceMeta}>{pt.zoning}</Text>
+                    {pt.bcr != null && (
+                      <>
+                        <Text style={styles.refLandPriceLabel}>建/容</Text>
+                        <Text style={styles.refLandPriceMeta}>{pt.bcr}/{pt.far}%</Text>
+                      </>
+                    )}
+                  </View>
+                  {/* 価格推移（直近5年分） */}
+                  {pt.history && (
+                    <View style={styles.refLandPriceHistoryRow}>
+                      {Object.entries(pt.history)
+                        .sort(([a], [b]) => Number(a) - Number(b))
+                        .slice(-5)
+                        .map(([year, price]) => (
+                          <View key={year} style={styles.refHistoryCell}>
+                            <Text style={styles.refHistoryYear}>{year.slice(2)}</Text>
+                            <Text style={styles.refHistoryPrice}>{Math.round(price / 1000)}k</Text>
+                          </View>
+                        ))}
+                    </View>
+                  )}
+                </View>
+              ))}
             </View>
           )}
 
@@ -713,6 +812,26 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "bold",
   },
+  analysisLoadingCard: {
+    backgroundColor: theme.bgCard,
+    borderRadius: 12,
+    padding: 24,
+    marginBottom: 16,
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "rgba(33, 150, 243, 0.2)",
+  },
+  analysisLoadingTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.accent,
+  },
+  analysisLoadingDesc: {
+    fontSize: 13,
+    color: theme.textSecondary,
+    textAlign: "center",
+  },
   // AI分析結果カード
   analysisCard: {
     backgroundColor: theme.bgCard,
@@ -832,6 +951,104 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textSecondary,
     lineHeight: 18,
+  },
+  // 参照データ
+  refDataSection: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+    paddingTop: 10,
+  },
+  refDataSectionTitle: {
+    fontSize: 11,
+    color: theme.textMuted,
+    fontWeight: "bold",
+    marginBottom: 6,
+  },
+  refDataTable: {
+    gap: 2,
+  },
+  refDataRow: {
+    flexDirection: "row",
+    paddingVertical: 3,
+  },
+  refDataKey: {
+    width: 70,
+    fontSize: 11,
+    color: theme.textSecondary,
+  },
+  refDataVal: {
+    flex: 1,
+    fontSize: 12,
+    color: theme.text,
+  },
+  refLandPriceCard: {
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 6,
+  },
+  refLandPriceHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  refLandPriceAddr: {
+    flex: 1,
+    fontSize: 12,
+    color: theme.text,
+    fontWeight: "600",
+  },
+  refLandPriceDist: {
+    fontSize: 11,
+    color: theme.textMuted,
+    marginLeft: 8,
+  },
+  refLandPriceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 2,
+  },
+  refLandPriceLabel: {
+    fontSize: 10,
+    color: theme.textSecondary,
+  },
+  refLandPriceValue: {
+    fontSize: 12,
+    color: theme.accent,
+    fontWeight: "bold",
+  },
+  refLandPriceRate: {
+    fontSize: 11,
+    fontWeight: "bold",
+  },
+  refLandPriceMeta: {
+    fontSize: 11,
+    color: theme.textSecondary,
+    marginRight: 4,
+  },
+  refLandPriceHistoryRow: {
+    flexDirection: "row",
+    gap: 4,
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.05)",
+  },
+  refHistoryCell: {
+    alignItems: "center",
+    flex: 1,
+  },
+  refHistoryYear: {
+    fontSize: 9,
+    color: theme.textMuted,
+  },
+  refHistoryPrice: {
+    fontSize: 10,
+    color: theme.textSecondary,
+    fontWeight: "600",
   },
   analysisDisclaimer: {
     fontSize: 10,

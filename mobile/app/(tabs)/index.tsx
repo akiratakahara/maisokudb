@@ -19,14 +19,20 @@ import { theme } from "@/constants/Colors";
 const SORT_OPTIONS = [
   { label: "登録日順", value: "createdAt" },
   { label: "価格順", value: "price" },
+  { label: "利回り順", value: "netYield" },
   { label: "面積順", value: "area" },
   { label: "築年数順", value: "builtDate" },
 ];
 
 const LAYOUT_OPTIONS = ["1K", "1LDK", "2K", "2LDK", "3LDK", "4LDK"];
 
+function calcNetYield(p: Property): number | null {
+  if (!p.price || p.price <= 0 || p.monthlyRent == null) return null;
+  return ((p.monthlyRent - (p.managementFee || 0) - (p.repairReserve || 0) - (p.otherMonthlyExpenses || 0)) * 12) / (p.price * 10000) * 100;
+}
+
 export default function HomeScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,14 +45,15 @@ export default function HomeScreen() {
   const [filterMaxPrice, setFilterMaxPrice] = useState("");
   const [filterMinArea, setFilterMinArea] = useState("");
   const [filterMaxArea, setFilterMaxArea] = useState("");
+  const [error, setError] = useState("");
 
   const fetchProperties = useCallback(async () => {
-    if (!user) {
-      router.replace("/auth");
+    if (authLoading || !user) {
+      setLoading(false);
       return;
     }
     try {
-      const params: Record<string, string> = { sortBy, sortOrder };
+      const params: Record<string, string> = { sortBy: sortBy === "netYield" ? "createdAt" : sortBy, sortOrder: sortBy === "netYield" ? "desc" : sortOrder };
       if (search) params.search = search;
       if (filterLayout) params.layout = filterLayout;
       if (filterMinPrice) params.minPrice = filterMinPrice;
@@ -55,14 +62,27 @@ export default function HomeScreen() {
       if (filterMaxArea) params.maxArea = filterMaxArea;
 
       const res = await api.getProperties(params);
-      setProperties(res.properties);
-    } catch {
-      // ignore
+      let items = res.properties;
+
+      // 実質利回りはクライアント側で計算・ソート
+      if (sortBy === "netYield") {
+        items = [...items].sort((a, b) => {
+          const ya = calcNetYield(a) ?? -Infinity;
+          const yb = calcNetYield(b) ?? -Infinity;
+          return sortOrder === "desc" ? yb - ya : ya - yb;
+        });
+      }
+
+      setProperties(items);
+      setError("");
+    } catch (e) {
+      console.error("物件取得エラー:", e);
+      setError(e instanceof Error ? e.message : "物件の取得に失敗しました");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea]);
+  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea]);
 
   useFocusEffect(
     useCallback(() => {
@@ -86,6 +106,7 @@ export default function HomeScreen() {
   }
 
   function renderProperty({ item }: { item: Property }) {
+    const netYield = calcNetYield(item);
     return (
       <TouchableOpacity
         style={styles.card}
@@ -98,6 +119,21 @@ export default function HomeScreen() {
           </Text>
           <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>
         </View>
+        {/* 利回り */}
+        {(item.grossYield != null || netYield != null) && (
+          <View style={styles.yieldRow}>
+            {item.grossYield != null && (
+              <Text style={styles.yieldText}>
+                表面 <Text style={styles.yieldNum}>{item.grossYield.toFixed(2)}%</Text>
+              </Text>
+            )}
+            {netYield != null && (
+              <Text style={styles.yieldText}>
+                実質 <Text style={styles.yieldNumNet}>{netYield.toFixed(2)}%</Text>
+              </Text>
+            )}
+          </View>
+        )}
         <View style={styles.cardDetails}>
           {item.layout && (
             <View style={styles.badge}>
@@ -120,12 +156,22 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
-        {item.address && (
+        {(item.prefecture || item.address) && (
           <Text style={styles.cardAddress} numberOfLines={1}>
-            {item.address}
+            {item.prefecture && item.city
+              ? `${item.prefecture} ${item.city}`
+              : item.address}
           </Text>
         )}
       </TouchableOpacity>
+    );
+  }
+
+  if (authLoading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color={theme.accent} style={styles.loader} />
+      </View>
     );
   }
 
@@ -217,14 +263,24 @@ export default function HomeScreen() {
           ListEmptyComponent={
             <View style={styles.empty}>
               <FontAwesome
-                name="building-o"
+                name={error ? "exclamation-circle" : "building-o"}
                 size={48}
-                color={theme.textMuted}
+                color={error ? theme.accent : theme.textMuted}
               />
-              <Text style={styles.emptyText}>物件がありません</Text>
-              <Text style={styles.emptySubText}>
-                PDFを読み込んで物件を登録しましょう
+              <Text style={styles.emptyText}>
+                {error ? "読み込みエラー" : "物件がありません"}
               </Text>
+              <Text style={styles.emptySubText}>
+                {error || "PDFを読み込んで物件を登録しましょう"}
+              </Text>
+              {error && (
+                <TouchableOpacity
+                  style={styles.retryButton}
+                  onPress={fetchProperties}
+                >
+                  <Text style={styles.retryText}>再試行</Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
         />
@@ -436,6 +492,25 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: theme.accent,
   },
+  yieldRow: {
+    flexDirection: "row",
+    gap: 14,
+    marginBottom: 6,
+  },
+  yieldText: {
+    fontSize: 12,
+    color: theme.textSecondary,
+  },
+  yieldNum: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: theme.accent,
+  },
+  yieldNumNet: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: theme.success,
+  },
   cardDetails: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -455,7 +530,15 @@ const styles = StyleSheet.create({
   loader: { marginTop: 40 },
   empty: { alignItems: "center", marginTop: 60, gap: 12 },
   emptyText: { fontSize: 16, color: theme.textSecondary },
-  emptySubText: { fontSize: 13, color: theme.textMuted },
+  emptySubText: { fontSize: 13, color: theme.textMuted, textAlign: "center", paddingHorizontal: 20 },
+  retryButton: {
+    marginTop: 12,
+    backgroundColor: theme.accent,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryText: { color: "#fff", fontSize: 14, fontWeight: "bold" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.7)",

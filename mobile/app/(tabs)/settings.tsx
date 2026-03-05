@@ -1,24 +1,86 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  TextInput,
   Alert,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { router } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
 import { theme } from "@/constants/Colors";
 
-export default function SettingsScreen() {
-  const { user, logout } = useAuth();
+export interface InvestorProfile {
+  age: string;
+  annualIncome: string;
+  outstandingDebt: string;
+  isListedCompany: boolean;
+  dependents: string;
+}
 
-  if (!user) {
-    router.replace("/auth");
+const PROFILE_STORAGE_KEY = "investor_profile";
+
+export async function loadInvestorProfile(): Promise<InvestorProfile | null> {
+  try {
+    const stored = await AsyncStorage.getItem(PROFILE_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
     return null;
   }
+}
+
+export default function SettingsScreen() {
+  const { user, loading: authLoading, logout } = useAuth();
+
+  // Profile state
+  const [age, setAge] = useState("");
+  const [annualIncome, setAnnualIncome] = useState("");
+  const [outstandingDebt, setOutstandingDebt] = useState("");
+  const [isListedCompany, setIsListedCompany] = useState(false);
+  const [dependents, setDependents] = useState("");
+  const [profileDirty, setProfileDirty] = useState(false);
+
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  async function loadProfile() {
+    const profile = await loadInvestorProfile();
+    if (profile) {
+      setAge(profile.age);
+      setAnnualIncome(profile.annualIncome);
+      setOutstandingDebt(profile.outstandingDebt);
+      setIsListedCompany(profile.isListedCompany);
+      setDependents(profile.dependents);
+    }
+  }
+
+  async function saveProfile() {
+    const profile: InvestorProfile = {
+      age,
+      annualIncome,
+      outstandingDebt,
+      isListedCompany,
+      dependents,
+    };
+    try {
+      await AsyncStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profile));
+      setProfileDirty(false);
+      Alert.alert("保存完了", "投資家プロフィールを保存しました");
+    } catch {
+      Alert.alert("エラー", "保存に失敗しました");
+    }
+  }
+
+  function markDirty() {
+    setProfileDirty(true);
+  }
+
+  if (authLoading || !user) return null;
 
   function handleLogout() {
     Alert.alert("ログアウト", "ログアウトしますか？", [
@@ -49,6 +111,86 @@ export default function SettingsScreen() {
               <Text style={styles.userEmail}>{user.email}</Text>
             </View>
           </View>
+        </View>
+      </View>
+
+      {/* Investor Profile Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>投資家プロフィール</Text>
+        <View style={styles.card}>
+          <Text style={styles.profileHint}>
+            シミュレーション時の融資審査判定に使用します
+          </Text>
+
+          <View style={styles.profileRow}>
+            <Text style={styles.profileLabel}>年齢</Text>
+            <TextInput
+              style={styles.profileInput}
+              value={age}
+              onChangeText={(v) => { setAge(v); markDirty(); }}
+              keyboardType="numeric"
+              placeholder="35"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Text style={styles.profileUnit}>歳</Text>
+          </View>
+
+          <View style={styles.profileRow}>
+            <Text style={styles.profileLabel}>年収</Text>
+            <TextInput
+              style={styles.profileInput}
+              value={annualIncome}
+              onChangeText={(v) => { setAnnualIncome(v); markDirty(); }}
+              keyboardType="numeric"
+              placeholder="500"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Text style={styles.profileUnit}>万円</Text>
+          </View>
+
+          <View style={styles.profileRow}>
+            <Text style={styles.profileLabel}>残債総額</Text>
+            <TextInput
+              style={styles.profileInput}
+              value={outstandingDebt}
+              onChangeText={(v) => { setOutstandingDebt(v); markDirty(); }}
+              keyboardType="numeric"
+              placeholder="0"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Text style={styles.profileUnit}>万円</Text>
+          </View>
+
+          <View style={styles.profileRow}>
+            <Text style={styles.profileLabel}>扶養家族</Text>
+            <TextInput
+              style={styles.profileInput}
+              value={dependents}
+              onChangeText={(v) => { setDependents(v); markDirty(); }}
+              keyboardType="numeric"
+              placeholder="0"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Text style={styles.profileUnit}>人</Text>
+          </View>
+
+          <View style={styles.profileRow}>
+            <Text style={[styles.profileLabel, { flex: 1 }]}>勤務先が上場企業</Text>
+            <TouchableOpacity
+              style={[styles.toggleButton, isListedCompany && styles.toggleActive]}
+              onPress={() => { setIsListedCompany(!isListedCompany); markDirty(); }}
+            >
+              <Text style={[styles.toggleText, isListedCompany && styles.toggleTextActive]}>
+                {isListedCompany ? "はい" : "いいえ"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {profileDirty && (
+            <TouchableOpacity style={styles.saveProfileButton} onPress={saveProfile}>
+              <Text style={styles.saveProfileText}>プロフィールを保存</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -182,6 +324,72 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: theme.textSecondary,
   },
+  // Profile
+  profileHint: {
+    fontSize: 12,
+    color: theme.textMuted,
+    marginBottom: 14,
+  },
+  profileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    gap: 8,
+  },
+  profileLabel: {
+    fontSize: 14,
+    color: theme.textSecondary,
+    width: 80,
+  },
+  profileInput: {
+    flex: 1,
+    backgroundColor: theme.bgInput,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 15,
+    color: theme.text,
+    borderWidth: 1,
+    borderColor: theme.border,
+    textAlign: "right",
+  },
+  profileUnit: {
+    fontSize: 13,
+    color: theme.textSecondary,
+    width: 30,
+  },
+  toggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: theme.bgInput,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  toggleActive: {
+    backgroundColor: "rgba(232, 68, 58, 0.15)",
+    borderColor: theme.accent,
+  },
+  toggleText: {
+    fontSize: 14,
+    color: theme.textSecondary,
+  },
+  toggleTextActive: {
+    color: theme.accent,
+    fontWeight: "bold",
+  },
+  saveProfileButton: {
+    backgroundColor: theme.accent,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  saveProfileText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  // Plan
   planRow: {
     flexDirection: "row",
     alignItems: "center",

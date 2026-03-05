@@ -54,23 +54,20 @@ function getPropertyValue(p: Property, key: AxisKey): number | null {
 }
 
 export default function CompareScreen() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [xAxis, setXAxis] = useState<AxisKey>("price");
-  const [yAxis, setYAxis] = useState<AxisKey>("area");
+  const [yAxis, setYAxis] = useState<AxisKey>("walkMinutes");
   const [axisModalFor, setAxisModalFor] = useState<"x" | "y" | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [compareList, setCompareList] = useState<string[]>([]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!user) {
-        router.replace("/auth");
-        return;
-      }
+      if (authLoading || !user) return;
       fetchProperties();
-    }, [user])
+    }, [user, authLoading])
   );
 
   async function fetchProperties() {
@@ -121,10 +118,23 @@ export default function CompareScreen() {
     compareList.includes(p.id)
   );
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color={theme.accent} style={{ marginTop: 40 }} />
+      </View>
+    );
+  }
+
+  if (!user) return null;
+
+  if (properties.length === 0) {
+    return (
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+        <FontAwesome name="bar-chart" size={48} color={theme.textSecondary} />
+        <Text style={{ color: theme.textSecondary, marginTop: 12, fontSize: 15 }}>
+          物件を登録すると比較できます
+        </Text>
       </View>
     );
   }
@@ -153,49 +163,64 @@ export default function CompareScreen() {
 
       {/* Scatter Plot */}
       <View style={styles.chartContainer}>
-        <Text style={styles.yAxisLabel}>{getAxisLabel(yAxis)}</Text>
-        <View style={styles.chart}>
-          {/* Grid lines */}
-          {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-            <View
-              key={`h-${pct}`}
-              style={[
-                styles.gridLineH,
-                { bottom: `${pct * 100}%` },
-              ]}
-            />
-          ))}
-          {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-            <View
-              key={`v-${pct}`}
-              style={[
-                styles.gridLineV,
-                { left: `${pct * 100}%` },
-              ]}
-            />
-          ))}
-
-          {/* Data points */}
-          {points.map((pt, i) => {
-            const px = ((pt.x - xMin) / xRange) * 100;
-            const py = ((pt.y - yMin) / yRange) * 100;
-            const isSelected = compareList.includes(pt.property.id);
-            return (
-              <TouchableOpacity
-                key={i}
+        {/* Y軸ラベル（左側・縦向き） + チャート */}
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <View style={styles.yAxisLabelContainer}>
+            <Text style={styles.yAxisLabel}>{getAxisLabel(yAxis)}</Text>
+          </View>
+          <View style={styles.chart}>
+            {/* Grid lines */}
+            {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
+              <View
+                key={`h-${pct}`}
                 style={[
-                  styles.dot,
-                  {
-                    left: `${Math.min(Math.max(px, 2), 96)}%`,
-                    bottom: `${Math.min(Math.max(py, 2), 96)}%`,
-                  },
-                  isSelected && styles.dotSelected,
+                  styles.gridLineH,
+                  { bottom: `${pct * 100}%` },
                 ]}
-                onPress={() => setSelectedProperty(pt.property)}
               />
-            );
-          })}
+            ))}
+            {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
+              <View
+                key={`v-${pct}`}
+                style={[
+                  styles.gridLineV,
+                  { left: `${pct * 100}%` },
+                ]}
+              />
+            ))}
+
+            {/* Data points */}
+            {points.map((pt, i) => {
+              const px = ((pt.x - xMin) / xRange) * 100;
+              const py = ((pt.y - yMin) / yRange) * 100;
+              const isSelected = compareList.includes(pt.property.id);
+              return (
+                <TouchableOpacity
+                  key={i}
+                  style={[
+                    styles.dot,
+                    {
+                      left: `${Math.min(Math.max(px, 2), 96)}%`,
+                      bottom: `${Math.min(Math.max(py, 2), 96)}%`,
+                    },
+                    isSelected && styles.dotSelected,
+                  ]}
+                  onPress={() => setSelectedProperty(pt.property)}
+                />
+              );
+            })}
+
+            {/* ドットなし時のメッセージ */}
+            {points.length === 0 && (
+              <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+                <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                  表示できるデータがありません
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
+        {/* X軸ラベル（下・チャート右端に揃える） */}
         <Text style={styles.xAxisLabel}>{getAxisLabel(xAxis)}</Text>
       </View>
 
@@ -391,13 +416,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
+  yAxisLabelContainer: {
+    width: 20,
+    height: CHART_SIZE * 0.7,
+    position: "relative",
+  },
   yAxisLabel: {
-    fontSize: 11,
+    position: "absolute",
+    width: CHART_SIZE * 0.7,
+    fontSize: 10,
     color: theme.textSecondary,
-    marginBottom: 4,
+    textAlign: "center",
+    top: CHART_SIZE * 0.7 / 2 - 7,
+    left: -(CHART_SIZE * 0.7 / 2) + 10,
+    transform: [{ rotate: "-90deg" }],
   },
   chart: {
-    width: CHART_SIZE,
+    width: CHART_SIZE - 24,
     height: CHART_SIZE * 0.7,
     backgroundColor: theme.bgCard,
     borderRadius: 12,
@@ -442,9 +477,12 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
   xAxisLabel: {
-    fontSize: 11,
+    fontSize: 10,
     color: theme.textSecondary,
     marginTop: 4,
+    textAlign: "center",
+    width: CHART_SIZE - 24,
+    alignSelf: "flex-end",
   },
   compareSection: {
     marginBottom: 16,

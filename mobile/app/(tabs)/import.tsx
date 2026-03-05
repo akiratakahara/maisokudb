@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { Paths, File, Directory } from "expo-file-system";
+import * as FileSystemLegacy from "expo-file-system/legacy";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { router } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
@@ -115,8 +116,8 @@ export default function ImportScreen() {
       });
       setAnalysis(result);
       setAnalysisReady(true);
-    } catch {
-      // 分析失敗は致命的ではないので静かに処理
+    } catch (e) {
+      console.error("Analysis error:", e);
       setAnalysis(null);
     } finally {
       setAnalysisLoading(false);
@@ -154,9 +155,10 @@ export default function ImportScreen() {
       srcFile.copy(destFile);
       setLocalPdfPath(destFile.uri);
 
-      // Gemini APIで物件情報を抽出
-      const pdfFile = new File(file.uri);
-      const base64 = await pdfFile.base64();
+      // Gemini APIで物件情報を抽出（legacy APIでbase64読み込み）
+      const base64 = await FileSystemLegacy.readAsStringAsync(file.uri, {
+        encoding: FileSystemLegacy.EncodingType.Base64,
+      });
 
       const res = await api.extractPdf(base64);
       const data = res.extracted as Record<string, unknown>;

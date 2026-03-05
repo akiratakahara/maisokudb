@@ -41,41 +41,45 @@ async function request<T>(
 // バックエンドの PropertyListResponse → モバイル Property 変換
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapBackendListItem(item: any): Property {
-  // station_info: "JR中央線 東京駅 徒歩5分" → パース
+  // notes dict からモバイル固有フィールドを取得（detail と同じ優先度）
+  const notes = item.notes || {};
+
+  // station_info: "横浜 徒歩10分" / "JR中央線 東京 徒歩5分" → パース
   let nearestStation: string | null = null;
   let walkMinutes: number | null = null;
   if (item.station_info) {
     const m = item.station_info.match(/(.+)\s+徒歩(\d+)分/);
     if (m) {
-      nearestStation = m[1];
+      nearestStation = m[1].trim();
       walkMinutes = parseInt(m[2]);
     } else {
       nearestStation = item.station_info;
     }
   }
 
-  // notes dict からモバイル固有フィールドを取得
-  const notes = item.notes || {};
-
   return {
     id: String(item.id),
     userId: "",
     name: item.name || "",
-    prefecture: item.prefecture || notes.prefecture || null,
-    city: item.city || notes.city || null,
+    prefecture: notes.prefecture || item.prefecture || null,
+    city: notes.city || item.city || null,
     address: item.full_address || null,
     nearestStation,
     walkMinutes,
     stationDailyPassengers: notes.station_daily_passengers ?? null,
     stationLines: notes.station_lines ?? null,
     price: item.price ? Math.round(Number(item.price) / 10000) : null,
-    grossYield: item.yield_rate ? Number(item.yield_rate) : null,
+    grossYield: notes.gross_yield ?? (item.yield_rate ? Number(item.yield_rate) : null),
     monthlyRent: notes.monthly_rent ?? null,
     managementFee: notes.management_fee ?? null,
     repairReserve: notes.repair_reserve ?? null,
     otherMonthlyExpenses: notes.other_monthly_expenses ?? null,
     layout: notes.layout ?? null,
-    area: item.building_area_tsubo ? Math.round(Number(item.building_area_tsubo) * 3.306 * 10) / 10 : null,
+    area: item.building_area_sqm
+      ? Number(item.building_area_sqm)
+      : item.building_area_tsubo
+      ? Math.round(Number(item.building_area_tsubo) * 3.306 * 10) / 10
+      : null,
     balconyArea: notes.balcony_area ?? null,
     builtDate: item.built_year ? `${item.built_year}年` : null,
     structure: notes.structure ?? null,
@@ -113,8 +117,8 @@ function mapBackendDetail(item: any): Property {
     id: String(item.id),
     userId: "",
     name: item.name || "",
-    prefecture: item.prefecture || notes.prefecture || null,
-    city: item.city || notes.city || null,
+    prefecture: notes.prefecture || item.prefecture || null,
+    city: notes.city || item.city || null,
     address: item.full_address || null,
     nearestStation: firstAccess.station_name || null,
     walkMinutes: firstAccess.walk_minutes || null,
@@ -170,6 +174,8 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
   return {
     name: body.name || "無題の物件",
     property_type: "区分マンション",
+    prefecture: body.prefecture || undefined,
+    city: body.city || undefined,
     full_address: body.address || undefined,
     price: price ? price * 10000 : undefined,
     building: {
@@ -574,6 +580,37 @@ export interface PropertyAnalysis {
       households?: number;
     } | null;
   };
+  reference_data?: {
+    land_price_points: LandPricePoint[];
+    station: {
+      name: string;
+      lat: number;
+      lng: number;
+      daily_passengers: number | null;
+      lines: { operator: string; line: string }[];
+    } | null;
+    did: {
+      in_did: boolean;
+      municipality?: string;
+      population?: number;
+      area_km2?: number;
+      density?: number;
+      households?: number;
+    } | null;
+    search_coords: { lat: number; lng: number } | null;
+  };
+}
+
+export interface LandPricePoint {
+  addr: string;
+  price: number;
+  rate: number | null;
+  use: string;
+  zoning: string;
+  bcr: number | null;
+  far: number | null;
+  distance_m: number;
+  history: Record<string, number>;
 }
 
 export interface SimulationResult {

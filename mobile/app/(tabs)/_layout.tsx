@@ -24,6 +24,7 @@ export default function TabLayout() {
         headerStyle: { backgroundColor: theme.bg },
         headerTintColor: theme.text,
         headerTitleStyle: { fontWeight: "bold" },
+        sceneStyle: { backgroundColor: theme.bg },
       }}
     >
       <Tabs.Screen
@@ -50,6 +51,15 @@ export default function TabLayout() {
           title: "比較",
           tabBarIcon: ({ color }) => (
             <TabBarIcon name="bar-chart" color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="simulation"
+        options={{
+          title: "シミュレーション",
+          tabBarIcon: ({ color }) => (
+            <TabBarIcon name="calculator" color={color} />
           ),
         }}
       />

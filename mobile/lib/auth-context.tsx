@@ -34,31 +34,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = await AsyncStorage.getItem("token");
       if (stored && token) {
         setUser(JSON.parse(stored));
+        setLoading(false);
+        return;
       }
     } catch {
-      // ignore
-    } finally {
-      setLoading(false);
+      // AsyncStorage読み込み失敗 → ゲストユーザーにフォールバック
+    }
+
+    // ゲストユーザーとして自動ログイン
+    const guestUser: User = {
+      id: "guest",
+      email: "guest@maisoku.app",
+      name: "ゲスト",
+      plan: "free",
+    };
+    setUser(guestUser);
+    setLoading(false);
+
+    try {
+      await AsyncStorage.setItem("user", JSON.stringify(guestUser));
+      await AsyncStorage.setItem("token", "guest-token");
+    } catch {
+      // ストレージ保存失敗は無視
     }
   }
 
   async function login(email: string, password: string) {
     const res = await api.login({ email, password });
-    await AsyncStorage.setItem("token", res.token);
-    await AsyncStorage.setItem("user", JSON.stringify(res.user));
     setUser(res.user);
+    try {
+      await AsyncStorage.setItem("token", res.token);
+      await AsyncStorage.setItem("user", JSON.stringify(res.user));
+    } catch {
+      // ストレージ保存失敗は無視
+    }
   }
 
   async function register(email: string, password: string, name: string) {
     const res = await api.register({ email, password, name });
-    await AsyncStorage.setItem("token", res.token);
-    await AsyncStorage.setItem("user", JSON.stringify(res.user));
     setUser(res.user);
+    try {
+      await AsyncStorage.setItem("token", res.token);
+      await AsyncStorage.setItem("user", JSON.stringify(res.user));
+    } catch {
+      // ストレージ保存失敗は無視
+    }
   }
 
   async function logout() {
-    await AsyncStorage.removeItem("token");
-    await AsyncStorage.removeItem("user");
+    try {
+      await AsyncStorage.removeItem("token");
+      await AsyncStorage.removeItem("user");
+    } catch {
+      // ストレージ削除失敗は無視
+    }
     setUser(null);
   }
 
