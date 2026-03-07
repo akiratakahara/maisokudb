@@ -7,6 +7,7 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  Linking,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
@@ -223,9 +224,28 @@ export default function SettingsScreen() {
             </View>
           </View>
           {user.plan === "free" && (
-            <TouchableOpacity style={styles.upgradeButton}>
-              <Text style={styles.upgradeText}>Proにアップグレード</Text>
-            </TouchableOpacity>
+            <>
+              <View style={styles.subscriptionInfo}>
+                <Text style={styles.subscriptionTitle}>MaisokuDB Pro</Text>
+                <Text style={styles.subscriptionDetail}>期間: 1ヶ月（自動更新）</Text>
+                <Text style={styles.subscriptionDetail}>料金: ¥1,480 / 月</Text>
+                <Text style={styles.subscriptionDetail}>・AI解析 無制限</Text>
+                <Text style={styles.subscriptionDetail}>・物件保存 無制限</Text>
+                <Text style={styles.subscriptionDetail}>・収益シミュレーション</Text>
+              </View>
+              <TouchableOpacity style={styles.upgradeButton}>
+                <Text style={styles.upgradeText}>Proにアップグレード（¥1,480/月）</Text>
+              </TouchableOpacity>
+              <View style={styles.legalLinks}>
+                <TouchableOpacity onPress={() => Linking.openURL("https://maisoku-db.com/terms")}>
+                  <Text style={styles.legalLink}>利用規約</Text>
+                </TouchableOpacity>
+                <Text style={styles.legalSep}>　|　</Text>
+                <TouchableOpacity onPress={() => Linking.openURL("https://maisoku-db.com/privacy")}>
+                  <Text style={styles.legalLink}>プライバシーポリシー</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
         </View>
       </View>
@@ -487,5 +507,37 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 15,
     fontWeight: "600",
+  },
+  subscriptionInfo: {
+    backgroundColor: theme.bgInput,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  subscriptionTitle: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: theme.text,
+    marginBottom: 6,
+  },
+  subscriptionDetail: {
+    fontSize: 13,
+    color: theme.textSecondary,
+    marginBottom: 2,
+  },
+  legalLinks: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  legalLink: {
+    fontSize: 12,
+    color: theme.accent,
+    textDecorationLine: "underline",
+  },
+  legalSep: {
+    fontSize: 12,
+    color: theme.textMuted,
   },
 });
