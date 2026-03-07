@@ -19,7 +19,9 @@ import { theme } from "@/constants/Colors";
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CHART_SIZE = SCREEN_WIDTH - 48;
 const CHART_H = Math.round(CHART_SIZE * 0.7);
-const Y_LABEL_W = 20;
+const Y_LABEL_W = 14;
+const Y_TICK_W = 40;
+const CHART_W = CHART_SIZE - Y_LABEL_W - Y_TICK_W - 4;
 
 const AXIS_OPTIONS = [
   { label: "価格（万円）", key: "price" },
@@ -116,6 +118,19 @@ export default function CompareScreen() {
     return AXIS_OPTIONS.find((o) => o.key === key)?.label ?? key;
   }
 
+  function formatTickValue(value: number, key: AxisKey): string {
+    const v = Math.round(value);
+    switch (key) {
+      case "price": return `${v}万`;
+      case "area": return `${v}㎡`;
+      case "pricePerSqm": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
+      case "age": return `${v}年`;
+      case "walkMinutes": return `${v}分`;
+      case "managementFee": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
+      default: return `${v}`;
+    }
+  }
+
   const comparedProperties = properties.filter((p) =>
     compareList.includes(p.id)
   );
@@ -165,9 +180,8 @@ export default function CompareScreen() {
 
       {/* Scatter Plot */}
       <View style={styles.chartContainer}>
-        {/* Y軸ラベル（左側・縦向き） + チャート */}
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* Y軸ラベル: コンテナごと rotate して確実に縦置き */}
+        <View style={{ flexDirection: "row" }}>
+          {/* Y軸ラベル: コンテナごと rotate して縦置き */}
           <View style={{ width: Y_LABEL_W, height: CHART_H, overflow: "visible" }}>
             <View style={{
               position: "absolute",
@@ -182,28 +196,26 @@ export default function CompareScreen() {
               <Text style={styles.yAxisLabel}>{getAxisLabel(yAxis)}</Text>
             </View>
           </View>
+
+          {/* Y軸 目盛り値（上・中・下） */}
+          <View style={{ width: Y_TICK_W, height: CHART_H, justifyContent: "space-between", paddingVertical: 2 }}>
+            <Text style={styles.yTickLabel}>{formatTickValue(yMax, yAxis)}</Text>
+            <Text style={styles.yTickLabel}>{formatTickValue((yMin + yMax) / 2, yAxis)}</Text>
+            <Text style={styles.yTickLabel}>{formatTickValue(yMin, yAxis)}</Text>
+          </View>
+
+          {/* チャート本体 */}
           <View style={styles.chart}>
-            {/* Grid lines */}
+            {/* 水平グリッド線 */}
             {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-              <View
-                key={`h-${pct}`}
-                style={[
-                  styles.gridLineH,
-                  { bottom: `${pct * 100}%` },
-                ]}
-              />
+              <View key={`h-${pct}`} style={[styles.gridLineH, { bottom: `${pct * 100}%` }]} />
             ))}
+            {/* 垂直グリッド線 */}
             {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
-              <View
-                key={`v-${pct}`}
-                style={[
-                  styles.gridLineV,
-                  { left: `${pct * 100}%` },
-                ]}
-              />
+              <View key={`v-${pct}`} style={[styles.gridLineV, { left: `${pct * 100}%` }]} />
             ))}
 
-            {/* Data points */}
+            {/* データ点 */}
             {points.map((pt, i) => {
               const px = ((pt.x - xMin) / xRange) * 100;
               const py = ((pt.y - yMin) / yRange) * 100;
@@ -224,7 +236,6 @@ export default function CompareScreen() {
               );
             })}
 
-            {/* ドットなし時のメッセージ */}
             {points.length === 0 && (
               <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
                 <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
@@ -234,7 +245,21 @@ export default function CompareScreen() {
             )}
           </View>
         </View>
-        {/* X軸ラベル（下・チャート右端に揃える） */}
+
+        {/* X軸 目盛り値（左・中・右） */}
+        <View style={{
+          flexDirection: "row",
+          justifyContent: "space-between",
+          width: CHART_W,
+          marginLeft: Y_LABEL_W + Y_TICK_W,
+          marginTop: 4,
+        }}>
+          <Text style={styles.xTickLabel}>{formatTickValue(xMin, xAxis)}</Text>
+          <Text style={styles.xTickLabel}>{formatTickValue((xMin + xMax) / 2, xAxis)}</Text>
+          <Text style={styles.xTickLabel}>{formatTickValue(xMax, xAxis)}</Text>
+        </View>
+
+        {/* X軸ラベル */}
         <Text style={styles.xAxisLabel}>{getAxisLabel(xAxis)}</Text>
       </View>
 
@@ -435,8 +460,18 @@ const styles = StyleSheet.create({
     color: theme.textSecondary,
     textAlign: "center",
   },
+  yTickLabel: {
+    fontSize: 9,
+    color: theme.textSecondary,
+    textAlign: "right",
+  },
+  xTickLabel: {
+    fontSize: 9,
+    color: theme.textSecondary,
+    textAlign: "center",
+  },
   chart: {
-    width: CHART_SIZE - Y_LABEL_W - 4,
+    width: CHART_W,
     height: CHART_H,
     backgroundColor: theme.bgCard,
     borderRadius: 12,
@@ -483,10 +518,10 @@ const styles = StyleSheet.create({
   xAxisLabel: {
     fontSize: 10,
     color: theme.textSecondary,
-    marginTop: 4,
+    marginTop: 2,
     textAlign: "center",
-    width: CHART_SIZE - Y_LABEL_W - 4,
-    alignSelf: "flex-end",
+    width: CHART_W,
+    marginLeft: Y_LABEL_W + Y_TICK_W,
   },
   compareSection: {
     marginBottom: 16,
