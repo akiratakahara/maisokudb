@@ -233,7 +233,23 @@ export default function SettingsScreen() {
                 <Text style={styles.subscriptionDetail}>・物件保存 無制限</Text>
                 <Text style={styles.subscriptionDetail}>・収益シミュレーション</Text>
               </View>
-              <TouchableOpacity style={styles.upgradeButton}>
+              <TouchableOpacity
+                style={styles.upgradeButton}
+                onPress={() =>
+                  Alert.alert(
+                    "Proプランにアップグレード",
+                    "¥1,480/月でAI解析・物件保存・収益シミュレーションが無制限になります。\n\nApp Storeの課金ページへ移動しますか？",
+                    [
+                      { text: "キャンセル", style: "cancel" },
+                      {
+                        text: "アップグレードする",
+                        onPress: () =>
+                          Linking.openURL("https://apps.apple.com/app/maisokudb"),
+                      },
+                    ]
+                  )
+                }
+              >
                 <Text style={styles.upgradeText}>Proにアップグレード（¥1,480/月）</Text>
               </TouchableOpacity>
               <View style={styles.legalLinks}>

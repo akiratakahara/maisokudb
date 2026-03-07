@@ -13,8 +13,9 @@ import {
   Alert,
 } from "react-native";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, router } from "expo-router";
 import { theme } from "@/constants/Colors";
+import { useAuth } from "@/lib/auth-context";
 import {
   api,
   BankComparisonItem,
@@ -924,6 +925,27 @@ export default function SimulationScreen() {
 
   // ---------- Main Render ----------
 
+  const { user } = useAuth();
+
+  if (user && user.plan === "free") {
+    return (
+      <View style={styles.gateContainer}>
+        <FontAwesome name="lock" size={48} color={theme.accent} />
+        <Text style={styles.gateTitle}>Proプラン限定機能</Text>
+        <Text style={styles.gateDesc}>
+          収益シミュレーションはProプランでご利用いただけます。{"\n"}
+          16行の銀行融資審査・キャッシュフロー計算・節税効果を確認できます。
+        </Text>
+        <TouchableOpacity
+          style={styles.gateButton}
+          onPress={() => router.push("/(tabs)/settings")}
+        >
+          <Text style={styles.gateButtonText}>Proにアップグレード（¥1,480/月）</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -1038,6 +1060,38 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     color: theme.textSecondary,
+  },
+  gateContainer: {
+    flex: 1,
+    backgroundColor: theme.bg,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 32,
+    gap: 16,
+  },
+  gateTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: theme.text,
+    marginTop: 8,
+  },
+  gateDesc: {
+    fontSize: 14,
+    color: theme.textSecondary,
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  gateButton: {
+    backgroundColor: theme.accent,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    marginTop: 8,
+  },
+  gateButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "bold",
   },
 
   // Section Headers
