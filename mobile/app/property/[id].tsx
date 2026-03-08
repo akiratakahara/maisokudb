@@ -14,6 +14,7 @@ import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { File } from "expo-file-system";
 import { api, Property, PropertyAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable } from "@/lib/api";
+import { isInCompareList, toggleCompareItem } from "@/lib/compare-store";
 import { theme } from "@/constants/Colors";
 
 const FIELD_CONFIG: { key: keyof Property; label: string }[] = [
@@ -83,9 +84,12 @@ export default function PropertyDetailScreen() {
   const [exitPrediction, setExitPrediction] = useState<ExitPrediction | null>(null);
   const [exitLoading, setExitLoading] = useState(false);
   const [exitExpanded, setExitExpanded] = useState(false);
+  // 比較リスト
+  const [inCompare, setInCompare] = useState(false);
 
   useEffect(() => {
     fetchProperty();
+    isInCompareList(id).then(setInCompare);
   }, [id]);
 
   async function fetchProperty() {
@@ -357,6 +361,22 @@ export default function PropertyDetailScreen() {
           />
           <Text style={styles.actionText}>
             {editing ? "キャンセル" : "編集"}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.actionButton, inCompare && styles.compareActiveButton]}
+          onPress={async () => {
+            const result = await toggleCompareItem(id);
+            if (result.maxReached) {
+              Alert.alert("上限", "比較できる物件は最大3件です。比較画面で選択を解除してください。");
+            } else {
+              setInCompare(result.added);
+            }
+          }}
+        >
+          <FontAwesome name="bar-chart" size={16} color={inCompare ? theme.accent : theme.text} />
+          <Text style={[styles.actionText, inCompare && { color: theme.accent }]}>
+            {inCompare ? "比較中" : "比較に追加"}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1096,6 +1116,10 @@ const styles = StyleSheet.create({
     flex: 0,
     paddingHorizontal: 16,
     borderColor: theme.accent,
+  },
+  compareActiveButton: {
+    borderColor: theme.accent,
+    backgroundColor: "rgba(232, 68, 58, 0.08)",
   },
   actionText: { fontSize: 13, color: theme.text },
   pdfButton: {

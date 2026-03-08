@@ -15,6 +15,7 @@ import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useAuth } from "@/lib/auth-context";
 import { api, Property } from "@/lib/api";
 import { theme } from "@/constants/Colors";
+import { getCompareList, toggleCompareItem } from "@/lib/compare-store";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CHART_SIZE = SCREEN_WIDTH - 48;
@@ -64,8 +65,8 @@ export default function CompareScreen() {
   const { user, loading: authLoading } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
-  const [xAxis, setXAxis] = useState<AxisKey>("price");
-  const [yAxis, setYAxis] = useState<AxisKey>("walkMinutes");
+  const [xAxis, setXAxis] = useState<AxisKey>("pricePerSqm");
+  const [yAxis, setYAxis] = useState<AxisKey>("grossYield");
   const [axisModalFor, setAxisModalFor] = useState<"x" | "y" | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null);
   const [compareList, setCompareList] = useState<string[]>([]);
@@ -74,6 +75,7 @@ export default function CompareScreen() {
     useCallback(() => {
       if (authLoading || !user) return;
       fetchProperties();
+      getCompareList().then(setCompareList);
     }, [user, authLoading])
   );
 
@@ -88,10 +90,9 @@ export default function CompareScreen() {
     }
   }
 
-  function toggleCompare(id: string) {
-    setCompareList((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+  async function toggleCompare(id: string) {
+    const result = await toggleCompareItem(id);
+    setCompareList(result.list);
   }
 
   // Scatter plot data
@@ -305,11 +306,16 @@ export default function CompareScreen() {
                 <Text style={styles.tableHeaderText}>項目</Text>
               </View>
               {comparedProperties.map((p) => (
-                <View key={p.id} style={styles.tableValueCell}>
+                <TouchableOpacity
+                  key={p.id}
+                  style={styles.tableValueCell}
+                  onPress={() => router.push(`/property/${p.id}`)}
+                >
                   <Text style={styles.tableHeaderText} numberOfLines={2}>
                     {p.name}
                   </Text>
-                </View>
+                  <FontAwesome name="chevron-right" size={10} color={theme.textSecondary} style={{ marginTop: 2 }} />
+                </TouchableOpacity>
               ))}
             </View>
             {[
