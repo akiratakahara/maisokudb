@@ -679,24 +679,90 @@ export default function PropertyDetailScreen() {
             <FontAwesome name={exitExpanded ? "chevron-up" : "chevron-down"} size={12} color={theme.textMuted} />
           </TouchableOpacity>
 
-          {/* 計算前提 */}
+          {/* 予測モデルの解説 */}
+          <View style={styles.exitModelBox}>
+            <Text style={styles.exitModelTitle}>予測モデル</Text>
+            <Text style={styles.exitModelFormula}>
+              売却価格 = 現在価格 × (土地変化 × 土地比率 + 建物残価変化 × 建物比率) × 流動性 × 人口補正
+            </Text>
+          </View>
+
+          {/* 計算前提（解説付き） */}
           <View style={styles.exitAssumptionBox}>
+            {/* 建物減価 */}
             {exitPrediction.structure && (
-              <Text style={styles.exitAssumptionText}>
-                構造: {exitPrediction.structure} (法定{exitPrediction.legal_life}年) ・
-                現在残価: {exitPrediction.current_building_residual_pct}%
-              </Text>
+              <View style={styles.exitFactorRow}>
+                <View style={styles.exitFactorHeader}>
+                  <FontAwesome name="building" size={11} color="#F59E0B" />
+                  <Text style={styles.exitFactorTitle}>建物減価</Text>
+                </View>
+                <Text style={styles.exitFactorValue}>
+                  {exitPrediction.structure} ・ 法定耐用年数 {exitPrediction.legal_life}年
+                </Text>
+                <Text style={styles.exitFactorDesc}>
+                  現在の建物残存価値は{exitPrediction.current_building_residual_pct}%。法定耐用年数に基づく定額法で減価し、最低20%を保証。{exitPrediction.structure === "RC造" || exitPrediction.structure === "SRC造" ? "RC/SRC造は47年と長く、価値の目減りが緩やか。" : exitPrediction.structure === "木造" ? "木造は22年と短く、築古になるほど建物価値の下落が大きい。" : ""}
+                </Text>
+              </View>
             )}
-            <Text style={styles.exitAssumptionText}>
-              地価トレンド: {exitPrediction.land_price_trend_pct > 0 ? "+" : ""}{exitPrediction.land_price_trend_pct}%/年
-              {exitPrediction.land_price_trend_basis ? `（${exitPrediction.land_price_trend_basis}）` : ""}
-            </Text>
-            <Text style={styles.exitAssumptionText}>
-              流動性: ×{exitPrediction.liquidity_multiplier} ({exitPrediction.num_lines}路線)
-            </Text>
-            <Text style={styles.exitAssumptionText}>
-              土地比率 {exitPrediction.assumptions.land_ratio_pct}% / 建物比率 {exitPrediction.assumptions.building_ratio_pct}%
-            </Text>
+
+            {/* 地価トレンド */}
+            <View style={styles.exitFactorRow}>
+              <View style={styles.exitFactorHeader}>
+                <FontAwesome name="area-chart" size={11} color="#F59E0B" />
+                <Text style={styles.exitFactorTitle}>地価トレンド</Text>
+              </View>
+              <Text style={styles.exitFactorValue}>
+                年率 {exitPrediction.land_price_trend_pct > 0 ? "+" : ""}{exitPrediction.land_price_trend_pct}%
+                {exitPrediction.land_price_trend_basis ? ` （${exitPrediction.land_price_trend_basis}）` : ""}
+              </Text>
+              <Text style={styles.exitFactorDesc}>
+                最寄駅周辺の地価公示データから算出した年間変化率。{exitPrediction.land_price_trend_pct > 0 ? `このエリアは地価が上昇傾向にあり、土地分の資産価値は年${exitPrediction.land_price_trend_pct}%ずつ増加する前提で計算。` : exitPrediction.land_price_trend_pct < 0 ? `このエリアは地価が下落傾向にあり、土地分の資産価値が年${Math.abs(exitPrediction.land_price_trend_pct)}%ずつ減少する前提で計算。` : "このエリアの地価は横ばい傾向。"}複利で将来価値を算出。
+              </Text>
+            </View>
+
+            {/* 土地・建物比率 */}
+            <View style={styles.exitFactorRow}>
+              <View style={styles.exitFactorHeader}>
+                <FontAwesome name="pie-chart" size={11} color="#F59E0B" />
+                <Text style={styles.exitFactorTitle}>土地・建物比率</Text>
+              </View>
+              <Text style={styles.exitFactorValue}>
+                土地 {exitPrediction.assumptions.land_ratio_pct}% / 建物 {exitPrediction.assumptions.building_ratio_pct}%
+              </Text>
+              <Text style={styles.exitFactorDesc}>
+                物件種別から推定した一般的な比率。{exitPrediction.assumptions.land_ratio_pct <= 25 ? "区分マンションは土地持分が小さいため、建物の減価が価格に大きく影響する。" : exitPrediction.assumptions.land_ratio_pct >= 40 ? "土地比率が高いため、地価トレンドの影響を受けやすい。" : ""}土地部分は地価トレンドで変化し、建物部分は法定耐用年数で減価。
+              </Text>
+            </View>
+
+            {/* 流動性 */}
+            <View style={styles.exitFactorRow}>
+              <View style={styles.exitFactorHeader}>
+                <FontAwesome name="exchange" size={11} color="#F59E0B" />
+                <Text style={styles.exitFactorTitle}>流動性係数</Text>
+              </View>
+              <Text style={styles.exitFactorValue}>
+                ×{exitPrediction.liquidity_multiplier} （{exitPrediction.num_lines}路線利用可）
+              </Text>
+              <Text style={styles.exitFactorDesc}>
+                利用可能な鉄道路線数から算出。{exitPrediction.num_lines >= 3 ? "複数路線が利用でき、売却時に買い手が見つかりやすい立地。" : exitPrediction.num_lines === 0 ? "鉄道アクセスが確認できず、流動性の補正なし。" : "路線数は標準的で、流動性への影響は小さい。"}路線が多いほど需要が厚く、実勢価格が理論値を上回りやすい。
+              </Text>
+            </View>
+
+            {/* 人口補正 */}
+            {exitPrediction.population && (
+              <View style={styles.exitFactorRow}>
+                <View style={styles.exitFactorHeader}>
+                  <FontAwesome name="users" size={11} color="#F59E0B" />
+                  <Text style={styles.exitFactorTitle}>人口動態補正</Text>
+                </View>
+                <Text style={styles.exitFactorValue}>
+                  {exitPrediction.population.pref}{exitPrediction.population.city ? ` ${exitPrediction.population.city}` : ""}：2040年 {exitPrediction.population.change_rate_2040 != null ? `${exitPrediction.population.change_rate_2040 > 0 ? "+" : ""}${exitPrediction.population.change_rate_2040}%` : "—"}
+                </Text>
+                <Text style={styles.exitFactorDesc}>
+                  {exitPrediction.population.trend === "growing" ? "人口増加エリアのため、将来の需要維持が見込め売却価格を上方補正。" : exitPrediction.population.trend === "declining" ? "人口減少エリアのため、将来の需要低下リスクを織り込み売却価格を下方補正。" : "人口はほぼ横ばいで、需給への影響は限定的。"}感応度0.3（人口10%変化 → 価格3%補正）で計算。
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* 予測テーブル */}
@@ -727,20 +793,24 @@ export default function PropertyDetailScreen() {
                 {f.building_residual_pct != null && (
                   <Text style={styles.forecastResidual}>残価{f.building_residual_pct}%</Text>
                 )}
+                {f.population_multiplier != null && f.population_multiplier !== 1.0 && (
+                  <Text style={[styles.forecastResidual, { color: f.population_multiplier > 1 ? "#4CAF50" : "#F44336" }]}>
+                    人口{f.population_multiplier > 1 ? "+" : ""}{((f.population_multiplier - 1) * 100).toFixed(1)}%
+                  </Text>
+                )}
               </View>
             </View>
           ))}
 
-          <Text style={styles.analysisDisclaimer}>
-            * 法定耐用年数ベースの簡易モデル。地価公示・駅データ活用。実際の売却価格は市況・物件状態により大きく異なります。
-          </Text>
+          {/* 悲観・楽観の説明 */}
+          <View style={styles.exitRangeExplain}>
+            <Text style={styles.exitRangeText}>
+              悲観・楽観は中央値から±15%の幅。地価変動の不確実性・物件固有の劣化リスク・市況変動を考慮したレンジ。実際の売却は仲介手数料（3%+6万円）等の諸費用が別途発生。
+            </Text>
+          </View>
 
           <View style={styles.dataSourceBox}>
-            {exitPrediction.calculated_at && (
-              <Text style={styles.dataSourceText}>
-                算出日時: {exitPrediction.calculated_at.replace("T", " ")}
-              </Text>
-            )}
+            <Text style={[styles.dataSourceText, { fontWeight: "bold", marginBottom: 4 }]}>データソース</Text>
             {exitPrediction.data_sources?.land_price && (
               <Text style={styles.dataSourceText}>地価: {exitPrediction.data_sources.land_price}</Text>
             )}
@@ -749,6 +819,14 @@ export default function PropertyDetailScreen() {
             )}
             {exitPrediction.data_sources?.depreciation && (
               <Text style={styles.dataSourceText}>減価: {exitPrediction.data_sources.depreciation}</Text>
+            )}
+            {exitPrediction.data_sources?.population && (
+              <Text style={styles.dataSourceText}>人口: {exitPrediction.data_sources.population}</Text>
+            )}
+            {exitPrediction.calculated_at && (
+              <Text style={[styles.dataSourceText, { marginTop: 4 }]}>
+                算出: {exitPrediction.calculated_at.replace("T", " ")}
+              </Text>
             )}
           </View>
         </View>
@@ -1727,17 +1805,69 @@ const styles = StyleSheet.create({
   exitCard: {
     borderColor: "rgba(245,158,11,0.2)",
   },
-  exitAssumptionBox: {
-    backgroundColor: "rgba(245,158,11,0.07)",
+  exitModelBox: {
+    backgroundColor: "rgba(245,158,11,0.05)",
     borderRadius: 8,
     padding: 10,
-    marginBottom: 12,
-    gap: 2,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: "#F59E0B",
   },
-  exitAssumptionText: {
+  exitModelTitle: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: "#F59E0B",
+    marginBottom: 4,
+  },
+  exitModelFormula: {
+    fontSize: 10,
+    color: theme.textSecondary,
+    lineHeight: 16,
+    fontFamily: "monospace",
+  },
+  exitAssumptionBox: {
+    marginBottom: 12,
+    gap: 0,
+  },
+  exitFactorRow: {
+    backgroundColor: "rgba(245,158,11,0.05)",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+  },
+  exitFactorHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  exitFactorTitle: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: "#F59E0B",
+  },
+  exitFactorValue: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: theme.text,
+    marginBottom: 4,
+  },
+  exitFactorDesc: {
     fontSize: 11,
     color: theme.textSecondary,
-    lineHeight: 18,
+    lineHeight: 17,
+  },
+  exitRangeExplain: {
+    backgroundColor: "rgba(245,158,11,0.05)",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  exitRangeText: {
+    fontSize: 11,
+    color: theme.textSecondary,
+    lineHeight: 17,
   },
   forecastRow: {
     flexDirection: "row",
