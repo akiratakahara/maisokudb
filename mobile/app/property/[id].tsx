@@ -13,7 +13,7 @@ import {
 import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { File } from "expo-file-system";
-import { api, Property, PropertyAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable } from "@/lib/api";
+import { api, Property, PropertyAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable, INVESTMENT_STATUSES } from "@/lib/api";
 import { isInCompareList, toggleCompareItem } from "@/lib/compare-store";
 import { theme } from "@/constants/Colors";
 
@@ -339,6 +339,39 @@ export default function PropertyDetailScreen() {
             {property.stationLines.join(" / ")}
           </Text>
         )}
+      </View>
+
+      {/* Investment Status */}
+      <View style={styles.statusRow}>
+        {INVESTMENT_STATUSES.map((s) => {
+          const active = property.investmentStatus === s.key;
+          return (
+            <TouchableOpacity
+              key={s.key}
+              style={[
+                styles.statusChip,
+                { borderColor: s.color },
+                active && { backgroundColor: s.color },
+              ]}
+              onPress={async () => {
+                const newStatus = active ? null : s.key;
+                try {
+                  await api.updateProperty(id, { investmentStatus: newStatus } as any);
+                  setProperty({ ...property, investmentStatus: newStatus } as Property);
+                } catch {}
+              }}
+            >
+              <FontAwesome
+                name={s.icon as any}
+                size={12}
+                color={active ? "#fff" : s.color}
+              />
+              <Text style={[styles.statusChipText, { color: active ? "#fff" : s.color }]}>
+                {s.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Action Buttons */}
@@ -786,6 +819,52 @@ export default function PropertyDetailScreen() {
         </View>
       )}
 
+      {/* 空室リスクシミュレーション */}
+      {property.monthlyRent && property.price && property.price > 0 && (
+        <View style={styles.analysisCard}>
+          <View style={styles.analysisTitleRow}>
+            <FontAwesome name="home" size={14} color="#8B5CF6" />
+            <Text style={[styles.analysisSectionTitle, { color: "#8B5CF6" }]}>
+              空室リスクシミュレーション
+            </Text>
+          </View>
+          <View style={styles.vacancyTable}>
+            <View style={styles.vacancyHeaderRow}>
+              <Text style={styles.vacancyHeaderCell}>空室率</Text>
+              <Text style={styles.vacancyHeaderCell}>年間収入</Text>
+              <Text style={styles.vacancyHeaderCell}>手取月額</Text>
+              <Text style={styles.vacancyHeaderCell}>実質利回り</Text>
+            </View>
+            {[0, 5, 10, 15, 20].map((rate) => {
+              const rent = property.monthlyRent!;
+              const expenses = (property.managementFee || 0) + (property.repairReserve || 0) + (property.otherMonthlyExpenses || 0);
+              const effectiveRent = rent * (1 - rate / 100);
+              const annualIncome = effectiveRent * 12;
+              const netMonthly = effectiveRent - expenses;
+              const netYield = ((effectiveRent - expenses) * 12) / (property.price! * 10000) * 100;
+              const isBase = rate === 0;
+              return (
+                <View key={rate} style={[styles.vacancyRow, isBase && styles.vacancyRowBase]}>
+                  <Text style={[styles.vacancyCell, isBase && styles.vacancyCellBold]}>{rate}%</Text>
+                  <Text style={[styles.vacancyCell, isBase && styles.vacancyCellBold]}>
+                    {Math.round(annualIncome / 10000).toLocaleString()}万
+                  </Text>
+                  <Text style={[styles.vacancyCell, isBase && styles.vacancyCellBold, netMonthly < 0 && { color: theme.accent }]}>
+                    {Math.round(netMonthly).toLocaleString()}円
+                  </Text>
+                  <Text style={[styles.vacancyCell, isBase && styles.vacancyCellBold, netYield < 0 && { color: theme.accent }]}>
+                    {netYield.toFixed(2)}%
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={styles.analysisDisclaimer}>
+            * 管理費・修繕積立金・その他月額費用を控除後の概算値
+          </Text>
+        </View>
+      )}
+
       {/* AI分析ボタン / ローディング表示 */}
       {analysisLoading ? (
         <View style={styles.analysisLoadingCard}>
@@ -1160,6 +1239,26 @@ const styles = StyleSheet.create({
   stationText: { fontSize: 13, color: theme.textSecondary },
   passengerText: { fontSize: 12, color: theme.accent, marginTop: 4 },
   stationLinesText: { fontSize: 11, color: theme.textMuted, marginTop: 2 },
+  statusRow: {
+    flexDirection: "row",
+    gap: 6,
+    marginBottom: 12,
+  },
+  statusChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    backgroundColor: "transparent",
+  },
+  statusChipText: {
+    fontSize: 11,
+    fontWeight: "bold",
+  },
   actionRow: {
     flexDirection: "row",
     gap: 8,
@@ -1310,6 +1409,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textSecondary,
     marginBottom: 2,
+  },
+  vacancyTable: {
+    borderRadius: 8,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  vacancyHeaderRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(139, 92, 246, 0.1)",
+    paddingVertical: 8,
+  },
+  vacancyHeaderCell: {
+    flex: 1,
+    fontSize: 11,
+    fontWeight: "bold",
+    color: "#8B5CF6",
+    textAlign: "center",
+  },
+  vacancyRow: {
+    flexDirection: "row",
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+  },
+  vacancyRowBase: {
+    backgroundColor: "rgba(139, 92, 246, 0.05)",
+  },
+  vacancyCell: {
+    flex: 1,
+    fontSize: 12,
+    color: theme.textSecondary,
+    textAlign: "center",
+  },
+  vacancyCellBold: {
+    fontWeight: "bold",
+    color: theme.text,
   },
   analysisSummaryBox: {
     backgroundColor: "rgba(33, 150, 243, 0.08)",

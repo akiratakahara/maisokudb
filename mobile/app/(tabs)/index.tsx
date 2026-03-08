@@ -13,7 +13,7 @@ import {
 import { router, useFocusEffect } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useAuth } from "@/lib/auth-context";
-import { api, Property } from "@/lib/api";
+import { api, Property, INVESTMENT_STATUSES } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const SORT_OPTIONS = [
@@ -45,6 +45,7 @@ export default function HomeScreen() {
   const [filterMaxPrice, setFilterMaxPrice] = useState("");
   const [filterMinArea, setFilterMinArea] = useState("");
   const [filterMaxArea, setFilterMaxArea] = useState("");
+  const [filterStatus, setFilterStatus] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const fetchProperties = useCallback(async () => {
@@ -60,6 +61,7 @@ export default function HomeScreen() {
       if (filterMaxPrice) params.maxPrice = filterMaxPrice;
       if (filterMinArea) params.minArea = filterMinArea;
       if (filterMaxArea) params.maxArea = filterMaxArea;
+      if (filterStatus) params.in_investment_status = filterStatus;
 
       const res = await api.getProperties(params);
       let items = res.properties;
@@ -82,7 +84,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea]);
+  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus]);
 
   useFocusEffect(
     useCallback(() => {
@@ -114,9 +116,19 @@ export default function HomeScreen() {
         activeOpacity={0.7}
       >
         <View style={styles.cardHeader}>
-          <Text style={styles.cardName} numberOfLines={1}>
-            {item.name}
-          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+            {item.investmentStatus && (() => {
+              const s = INVESTMENT_STATUSES.find((st) => st.key === item.investmentStatus);
+              return s ? (
+                <View style={[styles.cardStatusBadge, { backgroundColor: s.color }]}>
+                  <Text style={styles.cardStatusText}>{s.label}</Text>
+                </View>
+              ) : null;
+            })()}
+            <Text style={[styles.cardName, { flex: 1 }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+          </View>
           <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>
         </View>
         {/* 利回り */}
@@ -204,6 +216,31 @@ export default function HomeScreen() {
         >
           <FontAwesome name="sliders" size={18} color={theme.text} />
         </TouchableOpacity>
+      </View>
+
+      {/* Status Filter */}
+      <View style={styles.statusFilterRow}>
+        <TouchableOpacity
+          style={[styles.statusFilterChip, !filterStatus && styles.statusFilterChipActive]}
+          onPress={() => setFilterStatus(null)}
+        >
+          <Text style={[styles.statusFilterText, !filterStatus && styles.statusFilterTextActive]}>すべて</Text>
+        </TouchableOpacity>
+        {INVESTMENT_STATUSES.map((s) => (
+          <TouchableOpacity
+            key={s.key}
+            style={[
+              styles.statusFilterChip,
+              filterStatus === s.key && { backgroundColor: s.color, borderColor: s.color },
+            ]}
+            onPress={() => setFilterStatus(filterStatus === s.key ? null : s.key)}
+          >
+            <FontAwesome name={s.icon as any} size={10} color={filterStatus === s.key ? "#fff" : s.color} />
+            <Text style={[styles.statusFilterText, filterStatus === s.key && { color: "#fff" }]}>
+              {s.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {/* Sort Bar */}
@@ -441,6 +478,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderWidth: 1,
     borderColor: theme.border,
+  },
+  statusFilterRow: {
+    flexDirection: "row",
+    paddingHorizontal: 12,
+    gap: 5,
+    marginBottom: 8,
+  },
+  statusFilterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    backgroundColor: "transparent",
+  },
+  statusFilterChipActive: {
+    borderColor: theme.accent,
+    backgroundColor: "rgba(232, 68, 58, 0.1)",
+  },
+  statusFilterText: {
+    fontSize: 11,
+    color: theme.textSecondary,
+  },
+  statusFilterTextActive: {
+    color: theme.accent,
+  },
+  cardStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  cardStatusText: {
+    fontSize: 9,
+    fontWeight: "bold",
+    color: "#fff",
   },
   sortRow: {
     flexDirection: "row",

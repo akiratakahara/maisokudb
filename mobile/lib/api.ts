@@ -96,6 +96,7 @@ function mapBackendListItem(item: any): Property {
     pdfUrl: notes.local_pdf_path || item.primary_image_url || null,
     pricePerM2: item.price_per_m2 ?? null,
     population: item.population ?? null,
+    investmentStatus: item.investment_status ?? null,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -154,6 +155,7 @@ function mapBackendDetail(item: any): Property {
       return null;
     })(),
     population: item.population ?? null,
+    investmentStatus: item.investment_status ?? null,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -186,6 +188,7 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
     city: body.city || undefined,
     full_address: body.address || undefined,
     price: price ? price * 10000 : undefined,
+    investment_status: body.investmentStatus || undefined,
     building: {
       structure: body.structure || undefined,
       layout: body.layout || undefined,
@@ -404,9 +407,17 @@ export interface Property {
     change_rate_2040: number | null;
     trend: "growing" | "stable" | "declining" | "unknown";
   } | null;
+  investmentStatus: "検討中" | "交渉中" | "購入済" | "見送り" | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export const INVESTMENT_STATUSES = [
+  { key: "検討中", label: "検討中", color: "#60A5FA", icon: "search" },
+  { key: "交渉中", label: "交渉中", color: "#F59E0B", icon: "handshake-o" },
+  { key: "購入済", label: "購入済", color: "#4CAF50", icon: "check-circle" },
+  { key: "見送り", label: "見送り", color: "#9E9E9E", icon: "times-circle" },
+] as const;
 
 export interface Bank {
   id: number;
