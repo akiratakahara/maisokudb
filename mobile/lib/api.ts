@@ -95,6 +95,7 @@ function mapBackendListItem(item: any): Property {
     notes: notes.text ?? null,
     pdfUrl: notes.local_pdf_path || item.primary_image_url || null,
     pricePerM2: item.price_per_m2 ?? null,
+    population: item.population ?? null,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -152,6 +153,7 @@ function mapBackendDetail(item: any): Property {
       if (item.price && areaSqm && areaSqm > 0) return Math.round(Number(item.price) / areaSqm);
       return null;
     })(),
+    population: item.population ?? null,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -386,6 +388,22 @@ export interface Property {
   notes: string | null;
   pdfUrl: string | null;
   pricePerM2: number | null;
+  population: {
+    code: number;
+    pref: string;
+    city: string | null;
+    pop_2020: number | null;
+    pop_2040: number | null;
+    pop_2050: number | null;
+    idx_2025: number | null;
+    idx_2030: number | null;
+    idx_2035: number | null;
+    idx_2040: number | null;
+    idx_2045: number | null;
+    idx_2050: number | null;
+    change_rate_2040: number | null;
+    trend: "growing" | "stable" | "declining" | "unknown";
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

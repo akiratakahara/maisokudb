@@ -721,6 +721,71 @@ export default function PropertyDetailScreen() {
         </View>
       )}
 
+      {/* 人口トレンドセクション */}
+      {property?.population && (
+        <View style={styles.analysisCard}>
+          <View style={styles.analysisTitleRow}>
+            <FontAwesome name="users" size={14} color="#60A5FA" />
+            <Text style={[styles.analysisSectionTitle, { color: "#60A5FA" }]}>
+              エリア人口トレンド（2020→2040年推計）
+            </Text>
+          </View>
+          <View style={styles.populationRow}>
+            <View style={styles.populationBadge}>
+              <Text style={[
+                styles.populationTrend,
+                property.population.trend === "growing" && { color: "#4CAF50" },
+                property.population.trend === "stable" && { color: "#F59E0B" },
+                property.population.trend === "declining" && { color: theme.accent },
+              ]}>
+                {property.population.trend === "growing" ? "▲ 人口増加" :
+                 property.population.trend === "declining" ? "▼ 人口減少" : "━ 横ばい"}
+              </Text>
+              <Text style={styles.populationChangeRate}>
+                {property.population.change_rate_2040 != null
+                  ? `${property.population.change_rate_2040 > 0 ? "+" : ""}${property.population.change_rate_2040.toFixed(1)}%`
+                  : "—"}
+              </Text>
+            </View>
+            <View style={styles.populationStats}>
+              <Text style={styles.populationStatRow}>
+                2020年: {property.population.pop_2020?.toLocaleString() ?? "—"} 人
+              </Text>
+              <Text style={styles.populationStatRow}>
+                2040年: {property.population.pop_2040?.toLocaleString() ?? "—"} 人（推計）
+              </Text>
+              <Text style={styles.populationStatRow}>
+                2050年: {property.population.pop_2050?.toLocaleString() ?? "—"} 人（推計）
+              </Text>
+            </View>
+          </View>
+          {/* ミニバーチャート: 2020→2025→2030→2035→2040 */}
+          <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 4, marginTop: 12, height: 48 }}>
+            {([
+              { y: 2025, idx: property.population.idx_2025 },
+              { y: 2030, idx: property.population.idx_2030 },
+              { y: 2035, idx: property.population.idx_2035 },
+              { y: 2040, idx: property.population.idx_2040 },
+              { y: 2045, idx: property.population.idx_2045 },
+              { y: 2050, idx: property.population.idx_2050 },
+            ] as { y: number; idx: number | null }[]).map(({ y, idx }) => {
+              if (idx == null) return null;
+              const barH = Math.max(4, Math.round(48 * (idx / 100)));
+              const barColor = idx >= 100 ? "#4CAF50" : idx >= 85 ? "#F59E0B" : theme.accent;
+              return (
+                <View key={y} style={{ flex: 1, alignItems: "center" }}>
+                  <View style={{ width: "100%", height: barH, backgroundColor: barColor, borderRadius: 3 }} />
+                  <Text style={{ fontSize: 8, color: "#6b6459", marginTop: 2 }}>{String(y).slice(2)}</Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={[styles.dataSourceText, { marginTop: 6 }]}>
+            出典: 国立社会保障・人口問題研究所（2023年推計）
+          </Text>
+        </View>
+      )}
+
       {/* AI分析ボタン / ローディング表示 */}
       {analysisLoading ? (
         <View style={styles.analysisLoadingCard}>
@@ -1212,6 +1277,39 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: theme.accent,
     flex: 1,
+  },
+  populationRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 4,
+  },
+  populationBadge: {
+    backgroundColor: "rgba(96, 165, 250, 0.1)",
+    borderRadius: 8,
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 90,
+  },
+  populationTrend: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: theme.textSecondary,
+    marginBottom: 2,
+  },
+  populationChangeRate: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: theme.text,
+  },
+  populationStats: {
+    flex: 1,
+    justifyContent: "space-around",
+  },
+  populationStatRow: {
+    fontSize: 12,
+    color: theme.textSecondary,
+    marginBottom: 2,
   },
   analysisSummaryBox: {
     backgroundColor: "rgba(33, 150, 243, 0.08)",
