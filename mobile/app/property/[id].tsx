@@ -906,6 +906,25 @@ export default function PropertyDetailScreen() {
               空室リスクシミュレーション
             </Text>
           </View>
+          <View style={styles.vacancyExplainBox}>
+            <Text style={styles.vacancyExplainText}>
+              空室率とは、1年間のうち部屋が空いている割合です。例えば空室率5%は「年間約18日の空室」、10%は「約36日（退去〜次の入居まで約1ヶ月）」に相当します。
+            </Text>
+            <View style={styles.vacancyGuideRow}>
+              <View style={styles.vacancyGuideItem}>
+                <Text style={[styles.vacancyGuideRate, { color: "#4CAF50" }]}>0〜5%</Text>
+                <Text style={styles.vacancyGuideLabel}>都心・駅近</Text>
+              </View>
+              <View style={styles.vacancyGuideItem}>
+                <Text style={[styles.vacancyGuideRate, { color: "#F59E0B" }]}>5〜10%</Text>
+                <Text style={styles.vacancyGuideLabel}>一般的な水準</Text>
+              </View>
+              <View style={styles.vacancyGuideItem}>
+                <Text style={[styles.vacancyGuideRate, { color: theme.accent }]}>10〜20%</Text>
+                <Text style={styles.vacancyGuideLabel}>郊外・築古</Text>
+              </View>
+            </View>
+          </View>
           <View style={styles.vacancyTable}>
             <View style={styles.vacancyHeaderRow}>
               <Text style={styles.vacancyHeaderCell}>空室率</Text>
@@ -1487,6 +1506,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textSecondary,
     marginBottom: 2,
+  },
+  vacancyExplainBox: {
+    backgroundColor: "rgba(139, 92, 246, 0.05)",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: "#8B5CF6",
+  },
+  vacancyExplainText: {
+    fontSize: 11,
+    color: theme.textSecondary,
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  vacancyGuideRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  vacancyGuideItem: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: "rgba(139, 92, 246, 0.08)",
+    borderRadius: 6,
+    paddingVertical: 6,
+  },
+  vacancyGuideRate: {
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  vacancyGuideLabel: {
+    fontSize: 9,
+    color: theme.textSecondary,
+    marginTop: 2,
   },
   vacancyTable: {
     borderRadius: 8,
