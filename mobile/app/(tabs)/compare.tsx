@@ -237,7 +237,11 @@ export default function CompareScreen() {
                     isSelected && styles.dotSelected,
                   ]}
                   onPress={() => setSelectedProperty(pt.property)}
-                />
+                >
+                  <Text style={[styles.dotLabel, isSelected && styles.dotLabelSelected]}>
+                    {i + 1}
+                  </Text>
+                </TouchableOpacity>
               );
             })}
 
@@ -267,6 +271,32 @@ export default function CompareScreen() {
         {/* X軸ラベル */}
         <Text style={styles.xAxisLabel}>{getAxisLabel(xAxis)}</Text>
       </View>
+
+      {/* 凡例 */}
+      {points.length > 0 && (
+        <View style={styles.legendContainer}>
+          {points.map((pt, i) => {
+            const isSelected = compareList.includes(pt.property.id);
+            return (
+              <TouchableOpacity
+                key={pt.property.id}
+                style={styles.legendRow}
+                onPress={() => setSelectedProperty(pt.property)}
+              >
+                <View style={[styles.legendBadge, isSelected && styles.legendBadgeSelected]}>
+                  <Text style={[styles.legendBadgeText, isSelected && styles.legendBadgeTextSelected]}>
+                    {i + 1}
+                  </Text>
+                </View>
+                <Text style={styles.legendName} numberOfLines={1}>{pt.property.name}</Text>
+                <Text style={styles.legendValue}>
+                  {formatTickValue(pt.x, xAxis)}  /  {formatTickValue(pt.y, yAxis)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
 
       {/* Compare Section */}
       <View style={styles.compareSection}>
@@ -509,24 +539,34 @@ const styles = StyleSheet.create({
   },
   dot: {
     position: "absolute",
-    width: 14,
-    height: 14,
-    borderRadius: 7,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     backgroundColor: theme.accent,
-    marginLeft: -7,
-    marginBottom: -7,
-    opacity: 0.8,
+    marginLeft: -11,
+    marginBottom: -11,
+    opacity: 0.85,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  dotLabel: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  dotLabelSelected: {
+    color: "#fff",
   },
   dotSelected: {
-    backgroundColor: theme.warning,
     opacity: 1,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    marginLeft: -9,
-    marginBottom: -9,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    marginLeft: -13,
+    marginBottom: -13,
     borderWidth: 2,
     borderColor: "#fff",
+    backgroundColor: theme.accent,
   },
   xAxisLabel: {
     fontSize: 10,
@@ -535,6 +575,56 @@ const styles = StyleSheet.create({
     textAlign: "center",
     width: CHART_W,
     marginLeft: Y_LABEL_W + Y_TICK_W,
+  },
+  legendContainer: {
+    backgroundColor: theme.bgCard,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.border,
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  legendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+    gap: 10,
+  },
+  legendBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: theme.bgInput,
+    borderWidth: 1,
+    borderColor: theme.border,
+    justifyContent: "center",
+    alignItems: "center",
+    flexShrink: 0,
+  },
+  legendBadgeSelected: {
+    backgroundColor: theme.accent,
+    borderColor: theme.accent,
+  },
+  legendBadgeText: {
+    fontSize: 11,
+    fontWeight: "bold",
+    color: theme.textSecondary,
+  },
+  legendBadgeTextSelected: {
+    color: "#fff",
+  },
+  legendName: {
+    flex: 1,
+    fontSize: 13,
+    color: theme.text,
+  },
+  legendValue: {
+    fontSize: 12,
+    color: theme.textSecondary,
+    flexShrink: 0,
   },
   compareSection: {
     marginBottom: 16,
