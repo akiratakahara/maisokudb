@@ -13,7 +13,7 @@ import {
 import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { File } from "expo-file-system";
-import { api, Property, PropertyAnalysis, LandPricePoint } from "@/lib/api";
+import { api, Property, PropertyAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const FIELD_CONFIG: { key: keyof Property; label: string }[] = [
@@ -75,6 +75,14 @@ export default function PropertyDetailScreen() {
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  // 相場比較
+  const [marketComparison, setMarketComparison] = useState<MarketComparison | null>(null);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketExpanded, setMarketExpanded] = useState(false);
+  // 出口予測
+  const [exitPrediction, setExitPrediction] = useState<ExitPrediction | null>(null);
+  const [exitLoading, setExitLoading] = useState(false);
+  const [exitExpanded, setExitExpanded] = useState(false);
 
   useEffect(() => {
     fetchProperty();
@@ -103,6 +111,34 @@ export default function PropertyDetailScreen() {
       }
     }
     setEditData(data);
+  }
+
+  async function handleMarketComparison() {
+    if (!property) return;
+    setMarketLoading(true);
+    setMarketExpanded(true);
+    try {
+      const result = await api.getMarketComparison(id);
+      setMarketComparison(result);
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : "相場比較に失敗しました");
+    } finally {
+      setMarketLoading(false);
+    }
+  }
+
+  async function handleExitPrediction() {
+    if (!property) return;
+    setExitLoading(true);
+    setExitExpanded(true);
+    try {
+      const result = await api.getExitPrediction(id);
+      setExitPrediction(result);
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : "出口予測に失敗しました");
+    } finally {
+      setExitLoading(false);
+    }
   }
 
   async function handleAnalysis() {
@@ -363,6 +399,306 @@ export default function PropertyDetailScreen() {
           <FontAwesome name="calculator" size={18} color="#fff" />
           <Text style={styles.simulationButtonText}>収益シミュレーション</Text>
         </TouchableOpacity>
+      )}
+
+      {/* 相場比較ボタン */}
+      {marketLoading ? (
+        <View style={styles.analysisLoadingCard}>
+          <ActivityIndicator size="large" color="#8B5CF6" />
+          <Text style={[styles.analysisLoadingTitle, { color: "#8B5CF6" }]}>相場比較中...</Text>
+          <Text style={styles.analysisLoadingDesc}>複数駅スコア + 取引事例を照合しています</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={[styles.analysisButton, styles.marketButton]} onPress={handleMarketComparison}>
+          <FontAwesome name="home" size={18} color="#8B5CF6" />
+          <Text style={[styles.analysisButtonText, { color: "#8B5CF6" }]}>
+            {marketComparison ? "相場比較を再取得" : "相場比較（割安・割高）"}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* 相場比較結果 */}
+      {marketComparison && marketExpanded && (
+        <View style={[styles.analysisCard, styles.marketCard]}>
+          <TouchableOpacity style={styles.analysisTitleRow} onPress={() => setMarketExpanded(!marketExpanded)}>
+            <FontAwesome name="home" size={14} color="#8B5CF6" />
+            <Text style={[styles.analysisSectionTitle, { color: "#8B5CF6" }]}>相場比較</Text>
+            <FontAwesome name={marketExpanded ? "chevron-up" : "chevron-down"} size={12} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          {/* 判定バッジ */}
+          {marketComparison.assessment && (
+            <View style={[styles.assessmentBadge, {
+              backgroundColor: marketComparison.assessment === "割安" ? "rgba(76,175,80,0.15)"
+                : marketComparison.assessment === "割高" ? "rgba(244,67,54,0.15)"
+                : "rgba(255,193,7,0.15)",
+            }]}>
+              <Text style={[styles.assessmentText, {
+                color: marketComparison.assessment === "割安" ? "#4CAF50"
+                  : marketComparison.assessment === "割高" ? "#F44336"
+                  : "#FFC107",
+              }]}>
+                {marketComparison.assessment}
+                {marketComparison.diff_pct != null && ` (${marketComparison.diff_pct > 0 ? "+" : ""}${marketComparison.diff_pct}%)`}
+              </Text>
+            </View>
+          )}
+
+          {/* m²単価比較 */}
+          {marketComparison.property_price_m2 && (
+            <View style={styles.priceCompareBox}>
+              <View style={styles.priceCompareItem}>
+                <Text style={styles.priceCompareLabel}>この物件</Text>
+                <Text style={styles.priceCompareValue}>{Math.round(marketComparison.property_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+              </View>
+              {marketComparison.market_avg_price_m2 && (
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>周辺相場平均</Text>
+                  <Text style={[styles.priceCompareValue, { color: theme.textSecondary }]}>
+                    {Math.round(marketComparison.market_avg_price_m2 / 10000).toLocaleString()}万円/㎡
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* 利用駅（スコア順） */}
+          {marketComparison.stations.length > 0 && (
+            <View style={styles.stationsBox}>
+              <Text style={styles.stationsTitle}>アクセス評価（複数駅合算スコア: {marketComparison.total_access_score.toLocaleString()}）</Text>
+              {marketComparison.stations.map((st, i) => (
+                <View key={i} style={styles.stationScoreRow}>
+                  <FontAwesome name="train" size={11} color="#8B5CF6" />
+                  <Text style={styles.stationScoreName}>{st.name}</Text>
+                  <Text style={styles.stationScoreSub}>徒歩{st.walk_minutes}分</Text>
+                  {st.daily_passengers && (
+                    <Text style={styles.stationScoreSub}>{(st.daily_passengers / 10000).toFixed(0)}万人/日</Text>
+                  )}
+                  <Text style={[styles.stationScoreVal, { color: "#8B5CF6" }]}>スコア {st.score.toLocaleString()}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 取引事例サマリー */}
+          {marketComparison.transaction_summary && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                参照: 国交省取引事例 {marketComparison.transaction_summary.count}件 ({marketComparison.transaction_summary.period})
+              </Text>
+              <View style={styles.refDataTable}>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>m²単価範囲</Text>
+                  <Text style={styles.refDataVal}>
+                    {Math.round(marketComparison.transaction_summary.min_price_m2 / 10000)}〜{Math.round(marketComparison.transaction_summary.max_price_m2 / 10000)}万円/㎡
+                  </Text>
+                </View>
+                <View style={styles.refDataRow}>
+                  <Text style={styles.refDataKey}>平均取引額</Text>
+                  <Text style={styles.refDataVal}>{marketComparison.transaction_summary.avg_total_price.toLocaleString()}万円</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {!marketComparison.transaction_summary && (
+            <Text style={styles.analysisDisclaimer}>
+              取引事例データなし（REINFOLIB APIキー未設定または対象エリアのデータなし）
+            </Text>
+          )}
+
+          {/* 内部DB相場（登録済み物件からの集計） */}
+          {marketComparison.internal_comparable && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                参照: アプリ内登録物件 {marketComparison.internal_comparable.count}件（同エリア・同種別）
+              </Text>
+              {marketComparison.internal_comparable.reliable ? (
+                <View style={styles.refDataTable}>
+                  <View style={styles.refDataRow}>
+                    <Text style={styles.refDataKey}>中央値単価</Text>
+                    <Text style={styles.refDataVal}>
+                      {Math.round((marketComparison.internal_comparable.median_price_m2 ?? 0) / 10000).toLocaleString()}万円/㎡
+                    </Text>
+                  </View>
+                  <View style={styles.refDataRow}>
+                    <Text style={styles.refDataKey}>平均単価</Text>
+                    <Text style={styles.refDataVal}>
+                      {Math.round((marketComparison.internal_comparable.avg_price_m2 ?? 0) / 10000).toLocaleString()}万円/㎡
+                    </Text>
+                  </View>
+                  <View style={styles.refDataRow}>
+                    <Text style={styles.refDataKey}>単価レンジ</Text>
+                    <Text style={styles.refDataVal}>
+                      {Math.round((marketComparison.internal_comparable.min_price_m2 ?? 0) / 10000)}〜{Math.round((marketComparison.internal_comparable.max_price_m2 ?? 0) / 10000)}万円/㎡
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.analysisDisclaimer}>
+                  まだデータ不足（{marketComparison.internal_comparable.count}件 / 最低3件必要）。物件を登録するほど精度が上がります。
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* 賃料相場（登録済み物件の賃料から集計） */}
+          {marketComparison.internal_rent_comparable && (
+            <View style={styles.refDataSection}>
+              <Text style={styles.refDataSectionTitle}>
+                {"賃料相場（アプリ内 " + marketComparison.internal_rent_comparable.count + "件）" +
+                  (marketComparison.internal_rent_comparable.potential_count > 0
+                    ? "  ※うち満室想定 " + marketComparison.internal_rent_comparable.potential_count + "件含む"
+                    : "")}
+              </Text>
+              {marketComparison.internal_rent_comparable.reliable ? (
+                <View style={styles.refDataTable}>
+                  <View style={styles.refDataRow}>
+                    <Text style={styles.refDataKey}>中央値単価</Text>
+                    <Text style={styles.refDataVal}>
+                      {(marketComparison.internal_rent_comparable.median_rent_m2 ?? 0).toLocaleString()}円/㎡/月
+                    </Text>
+                  </View>
+                  <View style={styles.refDataRow}>
+                    <Text style={styles.refDataKey}>レンジ</Text>
+                    <Text style={styles.refDataVal}>
+                      {(marketComparison.internal_rent_comparable.min_rent_m2 ?? 0).toLocaleString()}〜{(marketComparison.internal_rent_comparable.max_rent_m2 ?? 0).toLocaleString()}円/㎡/月
+                    </Text>
+                  </View>
+                  {marketComparison.internal_rent_comparable.potential_count > 0 && (
+                    <Text style={styles.analysisDisclaimer}>
+                      ※満室想定賃料は売主・業者の見積もり値のため参考値です
+                    </Text>
+                  )}
+                </View>
+              ) : (
+                <Text style={styles.analysisDisclaimer}>
+                  賃料データ不足（{marketComparison.internal_rent_comparable.count}件 / 最低3件必要）
+                </Text>
+              )}
+            </View>
+          )}
+
+          <View style={styles.dataSourceBox}>
+            {marketComparison.calculated_at && (
+              <Text style={styles.dataSourceText}>
+                算出日時: {marketComparison.calculated_at.replace("T", " ")}
+              </Text>
+            )}
+            {marketComparison.data_sources?.transaction && (
+              <Text style={styles.dataSourceText}>取引: {marketComparison.data_sources.transaction}</Text>
+            )}
+            {marketComparison.data_sources?.internal && (
+              <Text style={styles.dataSourceText}>内部DB: {marketComparison.data_sources.internal}</Text>
+            )}
+            {marketComparison.data_sources?.internal_rent && (
+              <Text style={styles.dataSourceText}>賃料: {marketComparison.data_sources.internal_rent}</Text>
+            )}
+            {marketComparison.data_sources?.station && (
+              <Text style={styles.dataSourceText}>駅: {marketComparison.data_sources.station}</Text>
+            )}
+          </View>
+        </View>
+      )}
+
+      {/* 出口予測ボタン */}
+      {exitLoading ? (
+        <View style={styles.analysisLoadingCard}>
+          <ActivityIndicator size="large" color="#F59E0B" />
+          <Text style={[styles.analysisLoadingTitle, { color: "#F59E0B" }]}>出口予測計算中...</Text>
+          <Text style={styles.analysisLoadingDesc}>築年数減価・地価トレンド・駅アクセスを計算しています</Text>
+        </View>
+      ) : (
+        <TouchableOpacity style={[styles.analysisButton, styles.exitButton]} onPress={handleExitPrediction}>
+          <FontAwesome name="line-chart" size={18} color="#F59E0B" />
+          <Text style={[styles.analysisButtonText, { color: "#F59E0B" }]}>
+            {exitPrediction ? "出口予測を再計算" : "出口予測（5年・10年・15年後）"}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* 出口予測結果 */}
+      {exitPrediction && exitExpanded && (
+        <View style={[styles.analysisCard, styles.exitCard]}>
+          <TouchableOpacity style={styles.analysisTitleRow} onPress={() => setExitExpanded(!exitExpanded)}>
+            <FontAwesome name="line-chart" size={14} color="#F59E0B" />
+            <Text style={[styles.analysisSectionTitle, { color: "#F59E0B" }]}>出口予測</Text>
+            <FontAwesome name={exitExpanded ? "chevron-up" : "chevron-down"} size={12} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          {/* 計算前提 */}
+          <View style={styles.exitAssumptionBox}>
+            {exitPrediction.structure && (
+              <Text style={styles.exitAssumptionText}>
+                構造: {exitPrediction.structure} (法定{exitPrediction.legal_life}年) ・
+                現在残価: {exitPrediction.current_building_residual_pct}%
+              </Text>
+            )}
+            <Text style={styles.exitAssumptionText}>
+              地価トレンド: {exitPrediction.land_price_trend_pct > 0 ? "+" : ""}{exitPrediction.land_price_trend_pct}%/年
+              {exitPrediction.land_price_trend_basis ? `（${exitPrediction.land_price_trend_basis}）` : ""}
+            </Text>
+            <Text style={styles.exitAssumptionText}>
+              流動性: ×{exitPrediction.liquidity_multiplier} ({exitPrediction.num_lines}路線)
+            </Text>
+            <Text style={styles.exitAssumptionText}>
+              土地比率 {exitPrediction.assumptions.land_ratio_pct}% / 建物比率 {exitPrediction.assumptions.building_ratio_pct}%
+            </Text>
+          </View>
+
+          {/* 予測テーブル */}
+          {exitPrediction.forecasts.map((f) => (
+            <View key={f.year} style={styles.forecastRow}>
+              <View style={styles.forecastYearBox}>
+                <Text style={styles.forecastYear}>{f.year}年</Text>
+                <Text style={styles.forecastYearSub}>{f.years_ahead}年後</Text>
+              </View>
+              <View style={styles.forecastPrices}>
+                <View style={styles.forecastPriceItem}>
+                  <Text style={styles.forecastPriceLabel}>悲観</Text>
+                  <Text style={[styles.forecastPrice, { color: "#F44336" }]}>{Math.round(f.price_low / 10000).toLocaleString()}万</Text>
+                </View>
+                <View style={[styles.forecastPriceItem, styles.forecastMid]}>
+                  <Text style={styles.forecastPriceLabel}>中央値</Text>
+                  <Text style={[styles.forecastPrice, { color: "#F59E0B", fontSize: 16 }]}>{Math.round(f.price_mid / 10000).toLocaleString()}万</Text>
+                </View>
+                <View style={styles.forecastPriceItem}>
+                  <Text style={styles.forecastPriceLabel}>楽観</Text>
+                  <Text style={[styles.forecastPrice, { color: "#4CAF50" }]}>{Math.round(f.price_high / 10000).toLocaleString()}万</Text>
+                </View>
+              </View>
+              <View style={styles.forecastRoiBox}>
+                <Text style={[styles.forecastRoi, { color: f.roi_pct >= 0 ? "#4CAF50" : "#F44336" }]}>
+                  {f.roi_pct > 0 ? "+" : ""}{f.roi_pct}%
+                </Text>
+                {f.building_residual_pct != null && (
+                  <Text style={styles.forecastResidual}>残価{f.building_residual_pct}%</Text>
+                )}
+              </View>
+            </View>
+          ))}
+
+          <Text style={styles.analysisDisclaimer}>
+            * 法定耐用年数ベースの簡易モデル。地価公示・駅データ活用。実際の売却価格は市況・物件状態により大きく異なります。
+          </Text>
+
+          <View style={styles.dataSourceBox}>
+            {exitPrediction.calculated_at && (
+              <Text style={styles.dataSourceText}>
+                算出日時: {exitPrediction.calculated_at.replace("T", " ")}
+              </Text>
+            )}
+            {exitPrediction.data_sources?.land_price && (
+              <Text style={styles.dataSourceText}>地価: {exitPrediction.data_sources.land_price}</Text>
+            )}
+            {exitPrediction.data_sources?.station && (
+              <Text style={styles.dataSourceText}>駅: {exitPrediction.data_sources.station}</Text>
+            )}
+            {exitPrediction.data_sources?.depreciation && (
+              <Text style={styles.dataSourceText}>減価: {exitPrediction.data_sources.depreciation}</Text>
+            )}
+          </View>
+        </View>
       )}
 
       {/* AI分析ボタン / ローディング表示 */}
@@ -1054,6 +1390,164 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: theme.textMuted,
     marginTop: 10,
+    lineHeight: 14,
+  },
+  // 相場比較
+  marketButton: {
+    borderColor: "rgba(139,92,246,0.3)",
+  },
+  marketCard: {
+    borderColor: "rgba(139,92,246,0.2)",
+  },
+  assessmentBadge: {
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  assessmentText: {
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  priceCompareBox: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 12,
+  },
+  priceCompareItem: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 8,
+    padding: 10,
+    alignItems: "center",
+  },
+  priceCompareLabel: {
+    fontSize: 11,
+    color: theme.textSecondary,
+    marginBottom: 4,
+  },
+  priceCompareValue: {
+    fontSize: 15,
+    fontWeight: "bold",
+    color: theme.accent,
+  },
+  stationsBox: {
+    marginBottom: 10,
+  },
+  stationsTitle: {
+    fontSize: 11,
+    color: theme.textMuted,
+    marginBottom: 6,
+  },
+  stationScoreRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.05)",
+  },
+  stationScoreName: {
+    flex: 1,
+    fontSize: 13,
+    color: theme.text,
+    fontWeight: "600",
+  },
+  stationScoreSub: {
+    fontSize: 11,
+    color: theme.textSecondary,
+  },
+  stationScoreVal: {
+    fontSize: 11,
+    fontWeight: "bold",
+  },
+  // 出口予測
+  exitButton: {
+    borderColor: "rgba(245,158,11,0.3)",
+  },
+  exitCard: {
+    borderColor: "rgba(245,158,11,0.2)",
+  },
+  exitAssumptionBox: {
+    backgroundColor: "rgba(245,158,11,0.07)",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+    gap: 2,
+  },
+  exitAssumptionText: {
+    fontSize: 11,
+    color: theme.textSecondary,
+    lineHeight: 18,
+  },
+  forecastRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+    gap: 8,
+  },
+  forecastYearBox: {
+    width: 52,
+    alignItems: "center",
+  },
+  forecastYear: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: theme.text,
+  },
+  forecastYearSub: {
+    fontSize: 10,
+    color: theme.textMuted,
+  },
+  forecastPrices: {
+    flex: 1,
+    flexDirection: "row",
+    gap: 4,
+  },
+  forecastPriceItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+  forecastMid: {
+    backgroundColor: "rgba(245,158,11,0.07)",
+    borderRadius: 6,
+    paddingVertical: 2,
+  },
+  forecastPriceLabel: {
+    fontSize: 9,
+    color: theme.textMuted,
+    marginBottom: 2,
+  },
+  forecastPrice: {
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+  forecastRoiBox: {
+    width: 52,
+    alignItems: "center",
+  },
+  forecastRoi: {
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+  forecastResidual: {
+    fontSize: 10,
+    color: theme.textMuted,
+    marginTop: 2,
+  },
+  dataSourceBox: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.06)",
+    gap: 2,
+  },
+  dataSourceText: {
+    fontSize: 9,
+    color: theme.textMuted,
     lineHeight: 14,
   },
   // フィールド

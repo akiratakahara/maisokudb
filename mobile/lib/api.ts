@@ -94,6 +94,7 @@ function mapBackendListItem(item: any): Property {
     contactInfo: notes.contact_info ?? null,
     notes: notes.text ?? null,
     pdfUrl: notes.local_pdf_path || item.primary_image_url || null,
+    pricePerM2: item.price_per_m2 ?? null,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -146,6 +147,11 @@ function mapBackendDetail(item: any): Property {
     contactInfo: item.source_phone || notes.contact_info || null,
     notes: notes.text ?? null,
     pdfUrl: notes.local_pdf_path || null,
+    pricePerM2: (() => {
+      const areaSqm = building.total_area ? Number(building.total_area) : (item.land?.area_sqm ? Number(item.land.area_sqm) : null);
+      if (item.price && areaSqm && areaSqm > 0) return Math.round(Number(item.price) / areaSqm);
+      return null;
+    })(),
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -326,6 +332,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // 相場比較
+  getMarketComparison: (propertyId: string) =>
+    request<MarketComparison>(`/api/v1/analysis/market-comparison/${propertyId}`),
+
+  // 出口予測
+  getExitPrediction: (propertyId: string) =>
+    request<ExitPrediction>(`/api/v1/analysis/exit-prediction/${propertyId}`),
+
   // Health
   health: () => request<{ status: string }>("/health"),
 };
@@ -371,6 +385,7 @@ export interface Property {
   contactInfo: string | null;
   notes: string | null;
   pdfUrl: string | null;
+  pricePerM2: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -632,4 +647,105 @@ export interface SimulationResult {
   net_yield: number;
   roi: number;
   payback_years: number | null;
+}
+
+export interface MarketComparisonStation {
+  name: string;
+  line: string | null;
+  walk_minutes: number;
+  daily_passengers: number | null;
+  score: number;
+}
+
+export interface InternalComparable {
+  count: number;
+  reliable: boolean;
+  avg_price_m2: number | null;
+  median_price_m2: number | null;
+  min_price_m2: number | null;
+  max_price_m2: number | null;
+}
+
+export interface InternalRentComparable {
+  count: number;
+  current_count: number;
+  potential_count: number;
+  reliable: boolean;
+  median_rent_m2: number | null;
+  avg_rent_m2: number | null;
+  min_rent_m2: number | null;
+  max_rent_m2: number | null;
+}
+
+export interface MarketComparison {
+  property_price_m2: number | null;
+  area_sqm: number | null;
+  market_avg_price_m2: number | null;
+  diff_pct: number | null;
+  assessment: "割安" | "相場並み" | "割高" | null;
+  total_access_score: number;
+  stations: MarketComparisonStation[];
+  calculated_at: string;
+  data_sources: {
+    transaction: string | null;
+    internal: string | null;
+    internal_rent: string | null;
+    station: string;
+  };
+  internal_comparable: InternalComparable | null;
+  internal_rent_comparable: InternalRentComparable | null;
+  transaction_summary: {
+    count: number;
+    avg_price_m2: number;
+    min_price_m2: number;
+    max_price_m2: number;
+    avg_total_price: number;
+    period: string;
+    samples: {
+      unit_price: number;
+      total_price: number;
+      area: number;
+      floor_plan: string | null;
+      building_year: number | null;
+      period: string | null;
+    }[];
+  } | null;
+}
+
+export interface ExitForecast {
+  year: number;
+  years_ahead: number;
+  price_low: number;
+  price_mid: number;
+  price_high: number;
+  building_residual_pct: number | null;
+  roi_pct: number;
+}
+
+export interface ExitPrediction {
+  current_price: number | null;
+  current_year: number;
+  built_year: number | null;
+  structure: string | null;
+  legal_life: number;
+  current_building_residual_pct: number | null;
+  land_price_trend_pct: number;
+  land_price_trend_basis: string | null;
+  land_ratio: number;
+  liquidity_multiplier: number;
+  forecasts: ExitForecast[];
+  stations: MarketComparisonStation[];
+  num_lines: number;
+  assumptions: {
+    land_ratio_pct: number;
+    building_ratio_pct: number;
+    legal_life_years: number;
+    price_spread_pct: number;
+  };
+  calculated_at: string;
+  data_sources: {
+    land_price: string;
+    station: string;
+    depreciation: string;
+  };
 }
