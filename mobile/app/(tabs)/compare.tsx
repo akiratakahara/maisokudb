@@ -44,8 +44,14 @@ function getPropertyValue(p: Property, key: AxisKey): number | null {
       return p.area;
     case "pricePerSqm":
       return p.pricePerM2;
-    case "grossYield":
-      return p.grossYield;
+    case "grossYield": {
+      if (p.grossYield != null) return p.grossYield;
+      // monthlyRent と price から自動計算
+      if (p.monthlyRent && p.price && p.price > 0) {
+        return (p.monthlyRent * 12) / (p.price * 10000) * 100;
+      }
+      return null;
+    }
     case "age": {
       if (!p.builtDate) return null;
       const match = p.builtDate.match(/(\d{4})/);
@@ -127,8 +133,8 @@ export default function CompareScreen() {
     switch (key) {
       case "price": return `${v}万`;
       case "area": return `${v}㎡`;
-      case "pricePerSqm": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
-      case "grossYield": return `${v.toFixed(1)}%`;
+      case "pricePerSqm": return v >= 10000 ? `${Math.round(v / 10000)}万/㎡` : `${v}円/㎡`;
+      case "grossYield": return `${value.toFixed(1)}%`;
       case "age": return `${v}年`;
       case "walkMinutes": return `${v}分`;
       case "managementFee": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
@@ -280,7 +286,7 @@ export default function CompareScreen() {
             return (
               <TouchableOpacity
                 key={pt.property.id}
-                style={styles.legendRow}
+                style={[styles.legendRow, i === points.length - 1 && { borderBottomWidth: 0 }]}
                 onPress={() => setSelectedProperty(pt.property)}
               >
                 <View style={[styles.legendBadge, isSelected && styles.legendBadgeSelected]}>
