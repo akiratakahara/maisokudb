@@ -27,6 +27,7 @@ const AXIS_OPTIONS = [
   { label: "価格（万円）", key: "price" },
   { label: "面積（㎡）", key: "area" },
   { label: "㎡単価", key: "pricePerSqm" },
+  { label: "利回り（%）", key: "grossYield" },
   { label: "築年数", key: "age" },
   { label: "駅距離（分）", key: "walkMinutes" },
   { label: "管理費（円）", key: "managementFee" },
@@ -41,7 +42,9 @@ function getPropertyValue(p: Property, key: AxisKey): number | null {
     case "area":
       return p.area;
     case "pricePerSqm":
-      return p.price && p.area ? Math.round((p.price * 10000) / p.area) : null;
+      return p.pricePerM2;
+    case "grossYield":
+      return p.grossYield;
     case "age": {
       if (!p.builtDate) return null;
       const match = p.builtDate.match(/(\d{4})/);
@@ -124,6 +127,7 @@ export default function CompareScreen() {
       case "price": return `${v}万`;
       case "area": return `${v}㎡`;
       case "pricePerSqm": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
+      case "grossYield": return `${v.toFixed(1)}%`;
       case "age": return `${v}年`;
       case "walkMinutes": return `${v}分`;
       case "managementFee": return v >= 10000 ? `${Math.round(v / 10000)}万` : `${v}`;
@@ -309,7 +313,10 @@ export default function CompareScreen() {
               ))}
             </View>
             {[
-              { label: "価格", fn: (p: Property) => p.price ? `${p.price}万円` : "—" },
+              { label: "価格", fn: (p: Property) => p.price ? `${p.price.toLocaleString()}万円` : "—" },
+              { label: "㎡単価", fn: (p: Property) => p.pricePerM2 ? `${p.pricePerM2.toLocaleString()}円/㎡` : "—", highlight: true },
+              { label: "利回り", fn: (p: Property) => p.grossYield != null ? `${p.grossYield.toFixed(1)}%` : "—", highlight: true },
+              { label: "月額賃料", fn: (p: Property) => p.monthlyRent ? `${p.monthlyRent.toLocaleString()}円` : "—" },
               { label: "間取り", fn: (p: Property) => p.layout ?? "—" },
               { label: "面積", fn: (p: Property) => p.area ? `${p.area}㎡` : "—" },
               { label: "築年月", fn: (p: Property) => p.builtDate ?? "—" },
@@ -318,13 +325,13 @@ export default function CompareScreen() {
               { label: "管理費", fn: (p: Property) => p.managementFee ? `${p.managementFee.toLocaleString()}円` : "—" },
               { label: "階数", fn: (p: Property) => p.floor ?? "—" },
             ].map((row, i) => (
-              <View key={i} style={[styles.tableRow, i % 2 === 0 && styles.tableRowAlt]}>
+              <View key={i} style={[styles.tableRow, i % 2 === 0 && styles.tableRowAlt, row.highlight && styles.tableRowHighlight]}>
                 <View style={styles.tableLabelCell}>
-                  <Text style={styles.tableLabelText}>{row.label}</Text>
+                  <Text style={[styles.tableLabelText, row.highlight && styles.tableLabelHighlight]}>{row.label}</Text>
                 </View>
                 {comparedProperties.map((p) => (
                   <View key={p.id} style={styles.tableValueCell}>
-                    <Text style={styles.tableValueText}>{row.fn(p)}</Text>
+                    <Text style={[styles.tableValueText, row.highlight && styles.tableValueHighlight]}>{row.fn(p)}</Text>
                   </View>
                 ))}
               </View>
@@ -565,6 +572,9 @@ const styles = StyleSheet.create({
   tableRowAlt: {
     backgroundColor: "rgba(255,255,255,0.02)",
   },
+  tableRowHighlight: {
+    backgroundColor: "rgba(232, 68, 58, 0.08)",
+  },
   tableLabelCell: {
     width: 80,
     padding: 10,
@@ -584,9 +594,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: theme.textSecondary,
   },
+  tableLabelHighlight: {
+    color: theme.text,
+    fontWeight: "600",
+  },
   tableValueText: {
     fontSize: 12,
     color: theme.text,
+  },
+  tableValueHighlight: {
+    fontSize: 13,
+    fontWeight: "bold",
+    color: theme.accent,
   },
   modalOverlay: {
     flex: 1,
