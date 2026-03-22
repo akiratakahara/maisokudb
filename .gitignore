@@ -1,0 +1,21 @@
+
+# Data files
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qmd
+*.geojson
+*.xml
+A16-20_GML/
+L02-25_GML/
+N02-20_GML/
+S12-24_GML/
+node_modules/
+.DS_Store
+*.png
+*.xlsx
+*.numbers
+*.xlsm
+*.mjs
