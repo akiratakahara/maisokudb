@@ -97,6 +97,7 @@ function mapBackendListItem(item: any): Property {
     pricePerM2: item.price_per_m2 ?? null,
     population: item.population ?? null,
     investmentStatus: item.investment_status ?? null,
+    isDemo: !!notes.is_demo,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -134,7 +135,7 @@ function mapBackendDetail(item: any): Property {
     repairReserve: notes.repair_reserve ?? null,
     otherMonthlyExpenses: notes.other_monthly_expenses ?? null,
     layout: building.layout || notes.layout || null,
-    area: building.total_area_sqm ? Number(building.total_area_sqm) : null,
+    area: building.exclusive_area ? Number(building.exclusive_area) : (building.total_area ? Number(building.total_area) : (building.total_area_sqm ? Number(building.total_area_sqm) : null)),
     balconyArea: building.balcony_area_sqm ? Number(building.balcony_area_sqm) : (notes.balcony_area ?? null),
     builtDate: building.built_year ? `${building.built_year}年${building.built_month ? building.built_month + "月" : ""}` : null,
     structure: building.structure || notes.structure || null,
@@ -150,12 +151,13 @@ function mapBackendDetail(item: any): Property {
     notes: notes.text ?? null,
     pdfUrl: notes.local_pdf_path || null,
     pricePerM2: (() => {
-      const areaSqm = building.total_area ? Number(building.total_area) : (item.land?.area_sqm ? Number(item.land.area_sqm) : null);
+      const areaSqm = building.exclusive_area ? Number(building.exclusive_area) : (building.total_area ? Number(building.total_area) : (building.total_area_sqm ? Number(building.total_area_sqm) : null));
       if (item.price && areaSqm && areaSqm > 0) return Math.round(Number(item.price) / areaSqm);
       return null;
     })(),
     population: item.population ?? null,
     investmentStatus: item.investment_status ?? null,
+    isDemo: !!notes.is_demo,
     createdAt: item.created_at || "",
     updatedAt: item.updated_at || "",
   };
@@ -181,8 +183,15 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
   const balconyArea = toNum(body.balconyArea);
   const walkMinutes = toNum(body.walkMinutes);
 
+  // 物件名: 空なら住所・駅名からフォールバック生成
+  const fallbackName = body.address || (body.nearestStation ? `${body.nearestStation}周辺` : "") || body.city || "無題の物件";
+  const name = body.name || fallbackName;
+
+  // notes: undefinedだとJSON.stringifyで消えるのでnullを使用
+  const n = (v: unknown) => v !== undefined && v !== null && v !== "" ? v : null;
+
   return {
-    name: body.name || "無題の物件",
+    name,
     property_type: "区分マンション",
     prefecture: body.prefecture || undefined,
     city: body.city || undefined,
@@ -203,29 +212,29 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
       walk_minutes: walkMinutes,
     }] : [],
     notes: {
-      prefecture: body.prefecture || undefined,
-      city: body.city || undefined,
-      station_daily_passengers: body.stationDailyPassengers ?? undefined,
-      station_lines: body.stationLines ?? undefined,
-      gross_yield: toNum(body.grossYield),
-      monthly_rent: toNum(body.monthlyRent),
-      management_fee: toNum(body.managementFee),
-      repair_reserve: toNum(body.repairReserve),
-      other_monthly_expenses: toNum(body.otherMonthlyExpenses),
-      total_units: toNum(body.totalUnits),
-      layout: body.layout || undefined,
-      structure: body.structure || undefined,
-      floors: body.floors || undefined,
-      floor: body.floor || undefined,
-      balcony_area: balconyArea,
-      equipment: body.equipment,
-      transaction_type: body.transactionType || undefined,
-      sublease: body.sublease ?? undefined,
-      sublease_detail: body.subleaseDetail || undefined,
-      management_company: body.managementCompany || undefined,
-      contact_info: body.contactInfo || undefined,
-      text: body.notes || undefined,
-      local_pdf_path: body.pdfUrl || undefined,
+      prefecture: n(body.prefecture),
+      city: n(body.city),
+      station_daily_passengers: body.stationDailyPassengers ?? null,
+      station_lines: body.stationLines ?? null,
+      gross_yield: toNum(body.grossYield) ?? null,
+      monthly_rent: toNum(body.monthlyRent) ?? null,
+      management_fee: toNum(body.managementFee) ?? null,
+      repair_reserve: toNum(body.repairReserve) ?? null,
+      other_monthly_expenses: toNum(body.otherMonthlyExpenses) ?? null,
+      total_units: toNum(body.totalUnits) ?? null,
+      layout: n(body.layout),
+      structure: n(body.structure),
+      floors: n(body.floors),
+      floor: n(body.floor),
+      balcony_area: balconyArea ?? null,
+      equipment: body.equipment ?? null,
+      transaction_type: n(body.transactionType),
+      sublease: body.sublease ?? null,
+      sublease_detail: n(body.subleaseDetail),
+      management_company: n(body.managementCompany),
+      contact_info: n(body.contactInfo),
+      text: n(body.notes),
+      local_pdf_path: n(body.pdfUrl),
     },
   };
 }
@@ -262,6 +271,7 @@ export const api = {
       if (params.search) backendParams.search = params.search;
       if (params.minPrice) backendParams.min_price = String(Number(params.minPrice) * 10000);
       if (params.maxPrice) backendParams.max_price = String(Number(params.maxPrice) * 10000);
+      if (params.in_investment_status) backendParams.in_investment_status = params.in_investment_status;
     }
     const query = Object.keys(backendParams).length
       ? "?" + new URLSearchParams(backendParams).toString()
@@ -271,6 +281,12 @@ export const api = {
     const items = res.items || [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return { properties: items.map((item: any) => mapBackendListItem(item)) };
+  },
+
+  seedDemo: async (): Promise<{ created: number }> => {
+    return request<{ created: number }>("/api/v1/properties/seed-demo", {
+      method: "POST",
+    });
   },
 
   getProperty: async (id: string): Promise<{ property: Property }> => {
@@ -311,6 +327,20 @@ export const api = {
       body: JSON.stringify({ pdfBase64 }),
     }),
 
+  // AI - 画像（スクショ）抽出
+  extractImage: (imageBase64: string, mimeType: string) =>
+    request<{ extracted: Partial<Property> }>("/api/v1/documents/extract-base64", {
+      method: "POST",
+      body: JSON.stringify({ pdfBase64: imageBase64, mimeType }),
+    }),
+
+  // AI - URL抽出
+  extractUrl: (url: string) =>
+    request<{ extracted: Partial<Property> & { sourceUrl?: string } }>("/api/v1/documents/extract-url", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+
   // Banks
   getBanks: () => request<Bank[]>("/api/v1/banks"),
   getEligibleBanks: (params: Record<string, string>) => {
@@ -337,6 +367,16 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // AI分析（物件ID指定で実行＆保存）
+  analyzeAndSave: (propertyId: string) =>
+    request<PropertyAnalysis>(`/api/v1/analysis/property/${propertyId}`, {
+      method: "POST",
+    }),
+
+  // 保存済みAI分析結果を取得
+  getSavedAnalysis: (propertyId: string) =>
+    request<PropertyAnalysis & { analyzed_at?: string; status?: string }>(`/api/v1/analysis/saved/${propertyId}`),
+
   // 相場比較
   getMarketComparison: (propertyId: string) =>
     request<MarketComparison>(`/api/v1/analysis/market-comparison/${propertyId}`),
@@ -345,8 +385,108 @@ export const api = {
   getExitPrediction: (propertyId: string) =>
     request<ExitPrediction>(`/api/v1/analysis/exit-prediction/${propertyId}`),
 
+  // 物件スコアリング (100点満点)
+  getPropertyScore: (propertyId: string) =>
+    request<PropertyScore>(`/api/v1/analysis/score/${propertyId}`),
+
+  // 賃料相場分析
+  getRentAnalysis: (propertyId: string) =>
+    request<RentAnalysis>(`/api/v1/analysis/rent-analysis/${propertyId}`),
+
+  // Loan Presets
+  getLoanPresets: () =>
+    request<LoanPreset[]>("/api/v1/loan-presets"),
+
+  getLoanPreset: (id: number) =>
+    request<LoanPreset>(`/api/v1/loan-presets/${id}`),
+
+  createLoanPreset: (body: Omit<LoanPreset, "id" | "createdAt" | "updatedAt">) =>
+    request<LoanPreset>("/api/v1/loan-presets", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateLoanPreset: (id: number, body: Partial<LoanPreset>) =>
+    request<LoanPreset>(`/api/v1/loan-presets/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deleteLoanPreset: (id: number) =>
+    request<{ detail: string }>(`/api/v1/loan-presets/${id}`, {
+      method: "DELETE",
+    }),
+
+  seedSystemPresets: () =>
+    request<{ detail: string; seeded: number }>("/api/v1/loan-presets/seed-system", {
+      method: "POST",
+    }),
+
+  // Saved Simulations
+  getSavedSimulations: (propertyId?: number) => {
+    const query = propertyId != null ? `?property_id=${propertyId}` : "";
+    return request<SavedSimulationItem[]>(`/api/v1/saved-simulations${query}`);
+  },
+
+  getSavedSimulation: (id: number) =>
+    request<SavedSimulationItem>(`/api/v1/saved-simulations/${id}`),
+
+  saveSimulation: (body: SavedSimulationCreate) =>
+    request<SavedSimulationItem>("/api/v1/saved-simulations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  deleteSavedSimulation: (id: number) =>
+    request<{ detail: string }>(`/api/v1/saved-simulations/${id}`, {
+      method: "DELETE",
+    }),
+
   // Health
   health: () => request<{ status: string }>("/health"),
+
+  // 不動産情報ライブラリ
+  getReinfolibTransactions: (params: { prefecture?: string; city?: string; station_name?: string; area_sqm?: number; built_year?: number }) => {
+    const query = new URLSearchParams();
+    if (params.prefecture) query.set("prefecture", params.prefecture);
+    if (params.city) query.set("city", params.city);
+    if (params.station_name) query.set("station_name", params.station_name);
+    if (params.area_sqm) query.set("area_sqm", String(params.area_sqm));
+    if (params.built_year) query.set("built_year", String(params.built_year));
+    return request<ReinfolibTransactions>(`/api/v1/reinfolib/transactions?${query}`);
+  },
+
+  getReinfolibAreaInfo: (params: { lat?: number; lng?: number; station_name?: string; address?: string; prefecture?: string; city?: string }) => {
+    const query = new URLSearchParams();
+    if (params.lat != null) query.set("lat", String(params.lat));
+    if (params.lng != null) query.set("lng", String(params.lng));
+    if (params.address) query.set("address", params.address);
+    if (params.station_name) query.set("station_name", params.station_name);
+    if (params.prefecture) query.set("prefecture", params.prefecture);
+    if (params.city) query.set("city", params.city);
+    return request<ReinfolibAreaInfo>(`/api/v1/reinfolib/area-info?${query}`);
+  },
+
+  // コミュニティデータ
+  getCommunityMarketStats: (params: { station_name?: string; prefecture?: string; city?: string }) => {
+    const query = new URLSearchParams();
+    if (params.station_name) query.set("station_name", params.station_name);
+    if (params.prefecture) query.set("prefecture", params.prefecture);
+    if (params.city) query.set("city", params.city);
+    return request<CommunityMarketStats>(`/api/v1/community/market-stats?${query}`);
+  },
+
+  getCommunityComparables: (params: { station_name?: string; prefecture?: string; city?: string; min_area?: number; max_area?: number; structure?: string; exclude_property_id?: number }) => {
+    const query = new URLSearchParams();
+    if (params.station_name) query.set("station_name", params.station_name);
+    if (params.prefecture) query.set("prefecture", params.prefecture);
+    if (params.city) query.set("city", params.city);
+    if (params.min_area != null) query.set("min_area", String(params.min_area));
+    if (params.max_area != null) query.set("max_area", String(params.max_area));
+    if (params.structure) query.set("structure", params.structure);
+    if (params.exclude_property_id != null) query.set("exclude_property_id", String(params.exclude_property_id));
+    return request<CommunityComparables>(`/api/v1/community/comparables?${query}`);
+  },
 };
 
 export interface User {
@@ -408,6 +548,7 @@ export interface Property {
     trend: "growing" | "stable" | "declining" | "unknown";
   } | null;
   investmentStatus: "検討中" | "交渉中" | "購入済" | "見送り" | null;
+  isDemo: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -741,14 +882,232 @@ export interface MarketComparison {
   } | null;
 }
 
+export interface LoanPreset {
+  id: number;
+  name: string;
+  is_system: boolean;
+
+  // 基本融資条件
+  interest_rate: number | null;
+  max_loan_years: number | null;
+  loan_year_formula: "age_limit" | "building_age_limit" | "fixed" | null;
+  loan_year_base: number | null;
+  down_payment_ratio: number | null;
+  admin_fee_rate: number | null;
+  is_default: boolean;
+
+  // 審査条件
+  max_building_age: number | null;
+  min_area: number | null;
+  max_walk_minutes: number | null;
+  max_completion_age: number | null;
+  allowed_structures: string[] | null;
+  allowed_prefectures: string[] | null;
+  min_price: number | null;
+  max_price: number | null;
+  min_yield: number | null;
+  requires_new_quake_standard: boolean;
+
+  // メモ
+  memo: string | null;
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 物件がローンプリセットの審査条件に合致するか判定
+ */
+export function matchesLoanPreset(property: Property, preset: LoanPreset): { matches: boolean; reasons: string[] } {
+  const reasons: string[] = [];
+  const currentYear = new Date().getFullYear();
+
+  // 築年数チェック
+  if (preset.max_building_age != null && property.builtDate) {
+    const builtYearMatch = property.builtDate.match(/(\d{4})/);
+    if (builtYearMatch) {
+      const age = currentYear - parseInt(builtYearMatch[1]);
+      if (age > preset.max_building_age) {
+        reasons.push(`築${age}年（上限${preset.max_building_age}年）`);
+      }
+    }
+  }
+
+  // 新耐震基準チェック（1981年6月以降）
+  if (preset.requires_new_quake_standard && property.builtDate) {
+    const builtYearMatch = property.builtDate.match(/(\d{4})/);
+    if (builtYearMatch && parseInt(builtYearMatch[1]) < 1982) {
+      reasons.push("旧耐震基準");
+    }
+  }
+
+  // 面積チェック
+  if (preset.min_area != null && property.area != null) {
+    if (property.area < preset.min_area) {
+      reasons.push(`${property.area}㎡（下限${preset.min_area}㎡）`);
+    }
+  }
+
+  // 駅徒歩チェック
+  if (preset.max_walk_minutes != null && property.walkMinutes != null) {
+    if (property.walkMinutes > preset.max_walk_minutes) {
+      reasons.push(`徒歩${property.walkMinutes}分（上限${preset.max_walk_minutes}分）`);
+    }
+  }
+
+  // 構造チェック
+  if (preset.allowed_structures && preset.allowed_structures.length > 0 && property.structure) {
+    const matched = preset.allowed_structures.some(s => property.structure!.includes(s));
+    if (!matched) {
+      reasons.push(`${property.structure}（対象外）`);
+    }
+  }
+
+  // エリアチェック
+  if (preset.allowed_prefectures && preset.allowed_prefectures.length > 0 && property.prefecture) {
+    if (!preset.allowed_prefectures.includes(property.prefecture)) {
+      reasons.push(`${property.prefecture}（対象外エリア）`);
+    }
+  }
+
+  // 価格チェック（万円）
+  if (preset.min_price != null && property.price != null) {
+    if (property.price < preset.min_price) {
+      reasons.push(`${property.price}万円（下限${preset.min_price}万円）`);
+    }
+  }
+  if (preset.max_price != null && property.price != null) {
+    if (property.price > preset.max_price) {
+      reasons.push(`${property.price}万円（上限${preset.max_price}万円）`);
+    }
+  }
+
+  // 利回りチェック
+  if (preset.min_yield != null && property.grossYield != null) {
+    if (property.grossYield < preset.min_yield) {
+      reasons.push(`利回り${property.grossYield.toFixed(1)}%（下限${preset.min_yield}%）`);
+    }
+  }
+
+  return { matches: reasons.length === 0, reasons };
+}
+
+export interface SavedSimulationCreate {
+  property_id?: number;
+  label: string;
+  property_price: number;
+  monthly_rent: number;
+  management_fee?: number;
+  repair_reserve?: number;
+  built_year?: number;
+  structure?: string;
+  bank_name?: string;
+  interest_rate?: number;
+  loan_years?: number;
+  down_payment?: number;
+  loan_amount?: number;
+  buyer_age?: number;
+  monthly_payment?: number;
+  monthly_cf?: number;
+  annual_cf?: number;
+  gross_yield?: number;
+  net_yield?: number;
+  roi?: number;
+  total_payment?: number;
+  total_interest?: number;
+  initial_costs?: number;
+  payback_years?: number;
+  result_json?: any;
+}
+
+export interface SavedSimulationItem extends SavedSimulationCreate {
+  id: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ExitForecast {
   year: number;
   years_ahead: number;
   price_low: number;
   price_mid: number;
+  population_multiplier?: number | null;
   price_high: number;
   building_residual_pct: number | null;
   roi_pct: number;
+}
+
+export interface ScoreDetail {
+  item: string;
+  value: string;
+  score: number;
+  max: number;
+}
+
+export interface ScoreCategory {
+  label: string;
+  score: number;
+  max: number;
+  details: ScoreDetail[];
+}
+
+export interface PropertyScore {
+  total: number;
+  rank: string;
+  comment: string;
+  categories: {
+    profitability: ScoreCategory;
+    location: ScoreCategory;
+    asset_quality: ScoreCategory;
+    growth: ScoreCategory;
+  };
+}
+
+export interface RentComparable {
+  name: string;
+  rent: number;
+  area: number;
+  rent_m2: number;
+  walk_minutes: number | null;
+  structure: string | null;
+  built_date: string | null;
+}
+
+export interface RentAnalysis {
+  current_rent: number | null;
+  current_rent_m2: number | null;
+  area: number | null;
+  estimated_rent_m2: number | null;
+  estimated_rent: number | null;
+  estimated_range: { low: number; high: number } | null;
+  assessment: "適正" | "割安" | "割高" | null;
+  diff_pct: number | null;
+  comparables: RentComparable[];
+  comparable_stats: {
+    count: number;
+    avg_rent_m2: number;
+    median_rent_m2: number;
+    min_rent_m2: number;
+    max_rent_m2: number;
+  } | null;
+  yield_analysis: {
+    gross_yield: number;
+    net_yield: number;
+    monthly_expenses: number;
+    annual_income: number;
+    annual_net_income: number;
+  } | null;
+  estimated_yield: {
+    gross_yield: number;
+    net_yield: number;
+  } | null;
+  model_inputs: {
+    area: number | null;
+    age_years: number | null;
+    walk_minutes: number | null;
+    structure: string | null;
+    daily_passengers: number | null;
+  };
 }
 
 export interface ExitPrediction {
@@ -765,6 +1124,12 @@ export interface ExitPrediction {
   forecasts: ExitForecast[];
   stations: MarketComparisonStation[];
   num_lines: number;
+  population?: {
+    pref: string;
+    city?: string;
+    trend: string;
+    change_rate_2040?: number | null;
+  } | null;
   assumptions: {
     land_ratio_pct: number;
     building_ratio_pct: number;
@@ -776,5 +1141,99 @@ export interface ExitPrediction {
     land_price: string;
     station: string;
     depreciation: string;
+    population?: string;
   };
+}
+
+export interface ReinfolibTransaction {
+  unit_price: number;
+  total_price: number;
+  area: number;
+  floor_plan: string | null;
+  building_year: number | null;
+  structure: string | null;
+  period: string | null;
+  district: string | null;
+  municipality: string | null;
+  coverage_ratio: string | null;
+  floor_area_ratio: string | null;
+  city_planning: string | null;
+}
+
+export interface ReinfolibTransactions {
+  count: number;
+  avg_price_m2: number;
+  median_price_m2: number;
+  min_price_m2: number;
+  max_price_m2: number;
+  avg_total_price: number;
+  samples: ReinfolibTransaction[];
+  period: string;
+  city_code: string | null;
+  source: string;
+}
+
+export interface ReinfolibAreaInfo {
+  zoning: Record<string, any>[];
+  flood_risk: Record<string, any>[];
+  landslide_risk: Record<string, any>[];
+  land_prices: Record<string, any>[];
+  did: Record<string, any>[];
+  future_population: Record<string, any>[];
+  stations: Record<string, any>[];
+  elevation?: { elevation_m: number | null; source: string };
+  facilities?: {
+    facilities: Record<string, { label: string; count: number; items: { name: string; distance_m: number }[] }>;
+    total: number;
+    radius_m: number;
+    source: string;
+  };
+  estat?: {
+    vacancy_rate?: { rate: number; total_houses: number; vacant_houses: number; year: number } | null;
+    crime_stats?: { total_cases: number; prefecture_level: boolean } | null;
+    migration?: { transfers_in: number; transfers_out: number; net_migration: number; trend: string } | null;
+    source?: string;
+  };
+  resas?: {
+    population?: { data: { year: number; value: number }[]; trend: string } | null;
+    fiscal_strength?: { index: number; year: number; rating: string } | null;
+    estate_transactions?: { data: { year: number; value: number }[]; trend: string } | null;
+    source?: string;
+  };
+  source: string;
+}
+
+export interface CommunityComparable {
+  id: number;
+  name: string;
+  prefecture: string;
+  city: string;
+  full_address: string;
+  price: number | null;
+  price_per_sqm: number | null;
+  gross_yield: number | null;
+  area: number | null;
+  structure: string | null;
+  built_year: number | null;
+  station_name: string | null;
+  walk_minutes: number | null;
+  created_at: string | null;
+}
+
+export interface CommunityMarketStats {
+  total_properties: number;
+  station_name: string | null;
+  prefecture: string | null;
+  city: string | null;
+  price_stats: { avg: number | null; min: number | null; max: number | null; count: number } | null;
+  yield_stats: { avg: number | null; min: number | null; max: number | null } | null;
+  area_stats: { avg: number | null; min: number | null; max: number | null } | null;
+  area_ranking: { city: string; count: number; avg_price: number | null }[];
+  station_ranking: { station: string; count: number }[];
+  recent_properties: CommunityComparable[];
+}
+
+export interface CommunityComparables {
+  total: number;
+  comparables: CommunityComparable[];
 }
