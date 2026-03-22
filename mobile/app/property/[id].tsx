@@ -17,6 +17,7 @@ import { File } from "expo-file-system";
 import MapView, { Marker, Circle, Polygon } from "react-native-maps";
 import { api, Property, PropertyAnalysis, PropertyScore, RentAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable, LoanPreset, SavedSimulationItem, INVESTMENT_STATUSES, matchesLoanPreset, ReinfolibTransactions, ReinfolibAreaInfo, CommunityComparable, CommunityMarketStats } from "@/lib/api";
 import { isInCompareList, toggleCompareItem } from "@/lib/compare-store";
+import { useSubscription } from "@/lib/subscription-context";
 import { theme } from "@/constants/Colors";
 
 const FIELD_CONFIG: { key: keyof Property; label: string }[] = [
@@ -69,6 +70,7 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
 
 export default function PropertyDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { isPro } = useSubscription();
   const [property, setProperty] = useState<Property | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -235,8 +237,19 @@ export default function PropertyDetailScreen() {
     setEditData(data);
   }
 
+  function requirePro(featureName: string): boolean {
+    if (!isPro) {
+      Alert.alert("Pro限定機能", `${featureName}はProプランで利用できます。`, [
+        { text: "キャンセル" },
+        { text: "Proを見る", onPress: () => router.push("/paywall" as any) },
+      ]);
+      return false;
+    }
+    return true;
+  }
+
   async function handleMarketComparison() {
-    if (!property) return;
+    if (!property || !requirePro("相場比較")) return;
     setMarketLoading(true);
     setMarketExpanded(true);
     try {
@@ -250,6 +263,7 @@ export default function PropertyDetailScreen() {
   }
 
   async function handleExitPrediction() {
+    if (!requirePro("出口予測")) return;
     if (!property) return;
     setExitLoading(true);
     setExitExpanded(true);
@@ -283,7 +297,7 @@ export default function PropertyDetailScreen() {
   }
 
   async function handleAnalysis() {
-    if (!property) return;
+    if (!property || !requirePro("AI分析")) return;
     setAnalysisLoading(true);
     setAnalysisExpanded(true);
     try {

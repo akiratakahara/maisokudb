@@ -15,6 +15,7 @@ import {
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useLocalSearchParams, router } from "expo-router";
 import { theme } from "@/constants/Colors";
+import { useSubscription } from "@/lib/subscription-context";
 import { useAuth } from "@/lib/auth-context";
 import {
   api,
@@ -45,6 +46,7 @@ type ScreenState = "input" | "compare" | "detail";
 // ---------- Component ----------
 
 export default function SimulationScreen() {
+  const { isPro } = useSubscription();
   const params = useLocalSearchParams<{
     property_id?: string;
     property_price?: string;
@@ -1017,6 +1019,25 @@ export default function SimulationScreen() {
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={theme.accent} />
         <Text style={styles.loadingText}>計算中...</Text>
+      </View>
+    );
+  }
+
+  // Pro限定機能チェック
+  if (!isPro) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.bg, justifyContent: "center", alignItems: "center", padding: 32 }}>
+        <FontAwesome name="lock" size={48} color={theme.textMuted} />
+        <Text style={{ color: theme.text, fontSize: 20, fontWeight: "bold", marginTop: 16, marginBottom: 8 }}>Pro限定機能</Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: "center", marginBottom: 24, lineHeight: 22 }}>
+          収益シミュレーションはProプランで{"\n"}利用できます。{"\n"}16行の銀行融資条件で一括比較。
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: theme.accent, borderRadius: 12, paddingHorizontal: 32, paddingVertical: 14 }}
+          onPress={() => router.push("/paywall" as any)}
+        >
+          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "bold" }}>Proプランを見る</Text>
+        </TouchableOpacity>
       </View>
     );
   }
