@@ -29,6 +29,11 @@ async function request<T>(
     headers,
   });
 
+  // 204 No Content（削除成功等）はボディなし
+  if (res.status === 204) {
+    return null as T;
+  }
+
   const data = await res.json();
 
   if (!res.ok) {
@@ -201,8 +206,9 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
     building: {
       structure: body.structure || undefined,
       layout: body.layout || undefined,
-      total_area_sqm: area,
-      balcony_area_sqm: balconyArea,
+      total_area: area,
+      exclusive_area: area,
+      balcony_area: balconyArea,
       built_year: builtYearMatch ? parseInt(builtYearMatch[1]) : undefined,
       built_month: builtMonthMatch ? parseInt(builtMonthMatch[2]) : undefined,
       floors_above: floorsMatch ? parseInt(floorsMatch[1]) : undefined,

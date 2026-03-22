@@ -16,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maisokudb.app",
-      "buildNumber": "18",
+      "buildNumber": "20",
       "infoPlist": {
         "NSCameraUsageDescription": "物件写真を撮影するためにカメラを使用します",
         "NSPhotoLibraryUsageDescription": "物件画像をアップロードするために写真ライブラリを使用します",
