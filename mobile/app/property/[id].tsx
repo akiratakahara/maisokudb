@@ -2035,7 +2035,7 @@ export default function PropertyDetailScreen() {
                       ? "rgba(245,158,11,0.1)" : "rgba(74,222,128,0.1)",
                     borderRadius: 8, padding: 10, flex: 1, minWidth: 140,
                   }}>
-                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>空き家率</Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>空き家率（{property.prefecture || "都道府県"}）</Text>
                     <Text style={{
                       fontSize: 20, fontWeight: "bold",
                       color: reinfolibAreaInfo.estat.vacancy_rate.rate > 15
@@ -2057,7 +2057,7 @@ export default function PropertyDetailScreen() {
                       ? "rgba(74,222,128,0.1)" : "rgba(239,68,68,0.1)",
                     borderRadius: 8, padding: 10, flex: 1, minWidth: 140,
                   }}>
-                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>人口移動</Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>人口移動（{property.prefecture || "都道府県"}）</Text>
                     <Text style={{
                       fontSize: 16, fontWeight: "bold",
                       color: reinfolibAreaInfo.estat.migration.net_migration > 0 ? "#4CAF50" : "#EF4444",
