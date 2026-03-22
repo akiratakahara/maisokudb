@@ -305,6 +305,11 @@ export default function HomeScreen() {
               <Text style={styles.badgeText}>{item.area}㎡</Text>
             </View>
           )}
+          {item.builtDate && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{item.builtDate}</Text>
+            </View>
+          )}
           {item.nearestStation && (
             <View style={styles.badge}>
               <FontAwesome name="train" size={10} color={theme.textSecondary} />

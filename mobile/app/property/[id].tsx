@@ -2048,7 +2048,7 @@ export default function PropertyDetailScreen() {
                       ? "rgba(245,158,11,0.1)" : "rgba(74,222,128,0.1)",
                     borderRadius: 8, padding: 10, flex: 1, minWidth: 140,
                   }}>
-                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>空き家率（{property.prefecture || "都道府県"}）</Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>空き家率（{reinfolibAreaInfo.estat.vacancy_rate.level || property.prefecture || "都道府県"}）</Text>
                     <Text style={{
                       fontSize: 20, fontWeight: "bold",
                       color: reinfolibAreaInfo.estat.vacancy_rate.rate > 15
