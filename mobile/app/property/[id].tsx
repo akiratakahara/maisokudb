@@ -509,7 +509,19 @@ export default function PropertyDetailScreen() {
             {property.price ? `${property.price}万円` : "価格未定"}
           </Text>
           {propertyScore && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <TouchableOpacity
+              style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
+              onPress={() => Alert.alert(
+                `${propertyScore.rank}ランク（${Math.round(propertyScore.total)}点/100点）`,
+                "投資スコアは公的データをもとに自動算出しています。\n\n" +
+                "S（80〜100点）: 非常に優良\n" +
+                "A（60〜79点）: 優良\n" +
+                "B（40〜59点）: 標準\n" +
+                "C（20〜39点）: やや注意\n" +
+                "D（0〜19点）: 要検討\n\n" +
+                "立地・収益性・資産性・将来性の4カテゴリで採点しています。"
+              )}
+            >
               <View style={[{
                 backgroundColor: propertyScore.rank === "S" ? "#F59E0B" :
                   propertyScore.rank === "A" ? "#22C55E" :
@@ -518,10 +530,11 @@ export default function PropertyDetailScreen() {
                 borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
               }]}>
                 <Text style={{ fontSize: 14, fontWeight: "800", color: "#fff" }}>
-                  {Math.round(propertyScore.total)}点 {propertyScore.rank}
+                  {propertyScore.rank} {Math.round(propertyScore.total)}点
                 </Text>
               </View>
-            </View>
+              <FontAwesome name="question-circle-o" size={14} color={theme.textMuted} />
+            </TouchableOpacity>
           )}
         </View>
 
