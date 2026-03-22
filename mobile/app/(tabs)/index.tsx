@@ -15,6 +15,7 @@ import { router, useFocusEffect } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useAuth } from "@/lib/auth-context";
 import { api, Property, LoanPreset, INVESTMENT_STATUSES, matchesLoanPreset } from "@/lib/api";
+import { getBookmarks, toggleBookmark } from "@/lib/bookmark-store";
 import { theme } from "@/constants/Colors";
 
 const SORT_OPTIONS = [
@@ -74,7 +75,8 @@ export default function HomeScreen() {
   const [filterMaxWalk, setFilterMaxWalk] = useState("");
   const [filterStructure, setFilterStructure] = useState("");
   const [filterMinYield, setFilterMinYield] = useState("");
-  const [myOnly, setMyOnly] = useState(false);
+  const [viewMode, setViewMode] = useState<"all" | "my" | "bookmarks">("all");
+  const [bookmarkIds, setBookmarkIds] = useState<string[]>([]);
   const [error, setError] = useState("");
 
   const fetchProperties = useCallback(async () => {
@@ -95,7 +97,7 @@ export default function HomeScreen() {
       if (filterMinArea) params.minArea = filterMinArea;
       if (filterMaxArea) params.maxArea = filterMaxArea;
       if (filterStatus) params.in_investment_status = filterStatus;
-      if (myOnly) params.my_only = "true";
+      if (viewMode === "my") params.my_only = "true";
 
       const res = await api.getProperties(params);
       let items = res.properties;
@@ -133,6 +135,15 @@ export default function HomeScreen() {
           const wb = b.walkMinutes ?? Infinity;
           return sortOrder === "asc" ? wa - wb : wb - wa;
         });
+      }
+
+      // ブックマークIDsを読み込み
+      const bmarks = await getBookmarks();
+      setBookmarkIds(bmarks);
+
+      // お気に入りフィルタ
+      if (viewMode === "bookmarks") {
+        items = items.filter(p => bmarks.includes(String(p.id)));
       }
 
       // 物件が0件の場合、デモ物件をシード
@@ -179,7 +190,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus, filterLoanPresetId, filterMaxWalk, filterStructure, filterMinYield, myOnly]);
+  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus, filterLoanPresetId, filterMaxWalk, filterStructure, filterMinYield, viewMode]);
 
   useFocusEffect(
     useCallback(() => {
@@ -249,6 +260,21 @@ export default function HomeScreen() {
               {item.name && item.name !== "無題の物件" ? item.name : (item.address || item.nearestStation ? `${item.nearestStation || ""}周辺` : item.city || "無題の物件")}
             </Text>
           </View>
+          <TouchableOpacity
+            style={{ padding: 4, marginRight: 4 }}
+            onPress={async (e) => {
+              e.stopPropagation();
+              const result = await toggleBookmark(String(item.id));
+              setBookmarkIds(result.bookmarks);
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <FontAwesome
+              name={bookmarkIds.includes(String(item.id)) ? "star" : "star-o"}
+              size={18}
+              color={bookmarkIds.includes(String(item.id)) ? "#F59E0B" : theme.textMuted}
+            />
+          </TouchableOpacity>
           <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>
         </View>
         {/* 利回り */}
@@ -343,31 +369,30 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 自分の物件/すべてトグル */}
-      {user && user.id !== "guest" && (
-        <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 8 }}>
+      {/* すべて/お気に入り/自分の物件 タブ */}
+      <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 8 }}>
+        {([
+          { key: "all" as const, label: "すべて", icon: "globe" as const },
+          { key: "bookmarks" as const, label: "お気に入り", icon: "star" as const },
+          ...(user && user.id !== "guest" ? [{ key: "my" as const, label: "自分の物件", icon: "user" as const }] : []),
+        ]).map((tab) => (
           <TouchableOpacity
+            key={tab.key}
             style={{
-              paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
-              backgroundColor: !myOnly ? theme.accent : theme.bgCard,
-              borderWidth: 1, borderColor: !myOnly ? theme.accent : theme.border,
+              flexDirection: "row", alignItems: "center", gap: 4,
+              paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+              backgroundColor: viewMode === tab.key ? theme.accent : theme.bgCard,
+              borderWidth: 1, borderColor: viewMode === tab.key ? theme.accent : theme.border,
             }}
-            onPress={() => { setMyOnly(false); }}
+            onPress={() => setViewMode(tab.key)}
           >
-            <Text style={{ color: !myOnly ? "#000" : theme.text, fontSize: 13, fontWeight: "bold" }}>すべて</Text>
+            <FontAwesome name={tab.icon} size={11} color={viewMode === tab.key ? "#000" : theme.textSecondary} />
+            <Text style={{ color: viewMode === tab.key ? "#000" : theme.text, fontSize: 13, fontWeight: "bold" }}>
+              {tab.label}{tab.key === "bookmarks" && bookmarkIds.length > 0 ? ` (${bookmarkIds.length})` : ""}
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={{
-              paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
-              backgroundColor: myOnly ? theme.accent : theme.bgCard,
-              borderWidth: 1, borderColor: myOnly ? theme.accent : theme.border,
-            }}
-            onPress={() => { setMyOnly(true); }}
-          >
-            <Text style={{ color: myOnly ? "#000" : theme.text, fontSize: 13, fontWeight: "bold" }}>自分の物件</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        ))}
+      </View>
 
       {/* 件数表示 */}
       {!loading && (
