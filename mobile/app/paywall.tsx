@@ -93,9 +93,9 @@ export default function PaywallScreen() {
       {/* Free Plan Limits */}
       <View style={styles.freeCard}>
         <Text style={styles.freeTitle}>Free プランの制限</Text>
+        <Text style={styles.freeItem}>・AI分析: 月5回まで</Text>
         <Text style={styles.freeItem}>・AI抽出: 月10回まで</Text>
-        <Text style={styles.freeItem}>・物件保存: 50件まで</Text>
-        <Text style={styles.freeItem}>・シミュレーション: 基本機能のみ</Text>
+        <Text style={styles.freeItem}>・相場比較・出口予測: Pro限定</Text>
       </View>
 
       {/* Plan Selection */}

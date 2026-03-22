@@ -248,6 +248,25 @@ export default function PropertyDetailScreen() {
     return true;
   }
 
+  async function checkFreeLimit(key: string, limit: number, featureName: string): Promise<boolean> {
+    if (isPro) return true;
+    try {
+      const AsyncStorage = (await import("@react-native-async-storage/async-storage")).default;
+      const monthKey = `${key}_${new Date().getFullYear()}_${new Date().getMonth()}`;
+      const count = parseInt(await AsyncStorage.getItem(monthKey) || "0", 10);
+      if (count >= limit) {
+        Alert.alert(
+          "無料枠の上限",
+          `${featureName}は月${limit}回まで無料です。Proプランで無制限に。`,
+          [{ text: "OK" }, { text: "Proを見る", onPress: () => router.push("/paywall" as any) }]
+        );
+        return false;
+      }
+      await AsyncStorage.setItem(monthKey, String(count + 1));
+    } catch {}
+    return true;
+  }
+
   async function handleMarketComparison() {
     if (!property || !requirePro("相場比較")) return;
     setMarketLoading(true);
@@ -297,7 +316,8 @@ export default function PropertyDetailScreen() {
   }
 
   async function handleAnalysis() {
-    if (!property || !requirePro("AI分析")) return;
+    if (!property) return;
+    if (!(await checkFreeLimit("ai_analysis", 5, "AI分析"))) return;
     setAnalysisLoading(true);
     setAnalysisExpanded(true);
     try {
