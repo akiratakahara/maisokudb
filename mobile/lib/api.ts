@@ -278,6 +278,7 @@ export const api = {
       if (params.minPrice) backendParams.min_price = String(Number(params.minPrice) * 10000);
       if (params.maxPrice) backendParams.max_price = String(Number(params.maxPrice) * 10000);
       if (params.in_investment_status) backendParams.in_investment_status = params.in_investment_status;
+      if (params.my_only) backendParams.my_only = "true";
     }
     const query = Object.keys(backendParams).length
       ? "?" + new URLSearchParams(backendParams).toString()

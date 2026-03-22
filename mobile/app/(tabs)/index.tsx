@@ -74,6 +74,7 @@ export default function HomeScreen() {
   const [filterMaxWalk, setFilterMaxWalk] = useState("");
   const [filterStructure, setFilterStructure] = useState("");
   const [filterMinYield, setFilterMinYield] = useState("");
+  const [myOnly, setMyOnly] = useState(false);
   const [error, setError] = useState("");
 
   const fetchProperties = useCallback(async () => {
@@ -94,6 +95,7 @@ export default function HomeScreen() {
       if (filterMinArea) params.minArea = filterMinArea;
       if (filterMaxArea) params.maxArea = filterMaxArea;
       if (filterStatus) params.in_investment_status = filterStatus;
+      if (myOnly) params.my_only = "true";
 
       const res = await api.getProperties(params);
       let items = res.properties;
@@ -177,7 +179,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus, filterLoanPresetId, filterMaxWalk, filterStructure, filterMinYield]);
+  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus, filterLoanPresetId, filterMaxWalk, filterStructure, filterMinYield, myOnly]);
 
   useFocusEffect(
     useCallback(() => {
@@ -340,6 +342,32 @@ export default function HomeScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* 自分の物件/すべてトグル */}
+      {user && user.id !== "guest" && (
+        <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, marginBottom: 8 }}>
+          <TouchableOpacity
+            style={{
+              paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
+              backgroundColor: !myOnly ? theme.accent : theme.bgCard,
+              borderWidth: 1, borderColor: !myOnly ? theme.accent : theme.border,
+            }}
+            onPress={() => { setMyOnly(false); }}
+          >
+            <Text style={{ color: !myOnly ? "#000" : theme.text, fontSize: 13, fontWeight: "bold" }}>すべて</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={{
+              paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16,
+              backgroundColor: myOnly ? theme.accent : theme.bgCard,
+              borderWidth: 1, borderColor: myOnly ? theme.accent : theme.border,
+            }}
+            onPress={() => { setMyOnly(true); }}
+          >
+            <Text style={{ color: myOnly ? "#000" : theme.text, fontSize: 13, fontWeight: "bold" }}>自分の物件</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* 件数表示 */}
       {!loading && (
