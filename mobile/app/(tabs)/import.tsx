@@ -10,12 +10,15 @@ import {
   ActivityIndicator,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
 import { Paths, File, Directory } from "expo-file-system";
 import * as FileSystemLegacy from "expo-file-system/legacy";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { router } from "expo-router";
+import * as Linking from "expo-linking";
 import { useAuth } from "@/lib/auth-context";
-import { api, Property, PropertyAnalysis } from "@/lib/api";
+import { useSubscription } from "@/lib/subscription-context";
+import { api, Property, PropertyAnalysis, ReinfolibTransactions } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -74,6 +77,7 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
 
 export default function ImportScreen() {
   const { user, loading: authLoading } = useAuth();
+  const { isPro } = useSubscription();
   const [step, setStep] = useState<"select" | "loading" | "preview">("select");
   const [extractedData, setExtractedData] = useState<Record<string, string | number | null>>({});
   const [equipment, setEquipment] = useState<string[]>([]);
@@ -82,10 +86,17 @@ export default function ImportScreen() {
   const [saving, setSaving] = useState(false);
   const [pdfName, setPdfName] = useState("");
   const [localPdfPath, setLocalPdfPath] = useState("");
+
   // AI分析
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisReady, setAnalysisReady] = useState(false);
+  // マイソク画像プレビュー
+  const [pdfImageUri, setPdfImageUri] = useState<string | null>(null);
+  const [showMaisoku, setShowMaisoku] = useState(false);
+  // 公的取引データ
+  const [reinfolibMarket, setReinfolibMarket] = useState<ReinfolibTransactions | null>(null);
+  const [reinfolibLoading, setReinfolibLoading] = useState(false);
 
   if (authLoading || !user) return null;
 
@@ -124,7 +135,49 @@ export default function ImportScreen() {
     }
   }
 
+  async function fetchMarketData(data: Record<string, unknown>) {
+    const pref = data.prefecture ? String(data.prefecture) : undefined;
+    const city = data.city ? String(data.city) : undefined;
+    const stationName = data.nearestStation ? String(data.nearestStation) : undefined;
+    // 駅名 or 都道府県+市区町村のどちらかがあればOK
+    if (!stationName && (!pref || !city)) return;
+    setReinfolibLoading(true);
+    try {
+      const area = typeof data.area === "number" ? data.area : undefined;
+      const builtDate = data.builtDate ? String(data.builtDate) : null;
+      const builtYear = builtDate ? parseInt(builtDate.replace(/[^0-9]/g, "").slice(0, 4), 10) || undefined : undefined;
+      const result = await api.getReinfolibTransactions({
+        prefecture: pref,
+        city: city,
+        station_name: stationName,
+        area_sqm: area,
+        built_year: builtYear,
+      });
+      setReinfolibMarket(result);
+    } catch {
+      // 取得失敗は無視
+    } finally {
+      setReinfolibLoading(false);
+    }
+  }
+
+  function checkAiLimit(): boolean {
+    if (!isPro && (user?.aiUsageCount ?? 0) >= 10) {
+      Alert.alert(
+        "AI抽出制限",
+        "Freeプランの月間AI利用回数（10回）に達しました。\nProプランにアップグレードすると無制限で利用できます。",
+        [
+          { text: "閉じる", style: "cancel" },
+          { text: "Proを見る", onPress: () => router.push("/paywall" as any) },
+        ]
+      );
+      return false;
+    }
+    return true;
+  }
+
   async function handlePickPdf() {
+    if (!checkAiLimit()) return;
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: "application/pdf",
@@ -184,10 +237,70 @@ export default function ImportScreen() {
 
       // バックグラウンドでAI分析を実行
       runAnalysis(data);
+      fetchMarketData(data);
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : "PDF読み込みに失敗しました");
       setStep("select");
     }
+  }
+
+  async function handlePickImage() {
+    if (!checkAiLimit()) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets[0].base64) return;
+
+      const asset = result.assets[0];
+      const mimeType = asset.uri.endsWith(".png") ? "image/png" : "image/jpeg";
+
+      setPdfName("スクリーンショット");
+      setStep("loading");
+      setAnalysis(null);
+
+      const res = await api.extractImage(asset.base64!, mimeType);
+      const data = res.extracted as Record<string, unknown>;
+
+      const equipmentData = Array.isArray(data.equipment)
+        ? (data.equipment as string[])
+        : [];
+      setEquipment(equipmentData);
+      setStationDailyPassengers(typeof data.stationDailyPassengers === "number" ? data.stationDailyPassengers : null);
+      setStationLines(Array.isArray(data.stationLines) ? data.stationLines as string[] : null);
+
+      const fields: Record<string, string | number | null> = {};
+      for (const key of EDITABLE_FIELDS) {
+        const val = data[key];
+        if (key === "sublease") {
+          fields[key] = val === true ? "あり" : val === false ? "なし" : null;
+        } else {
+          fields[key] = val !== undefined && val !== null ? String(val) : null;
+        }
+      }
+      setExtractedData(fields);
+      setStep("preview");
+
+      runAnalysis(data);
+      fetchMarketData(data);
+    } catch (e) {
+      Alert.alert("エラー", e instanceof Error ? e.message : "画像からの抽出に失敗しました");
+      setStep("select");
+    }
+  }
+
+  function handleManualEntry() {
+    const fields: Record<string, string | number | null> = {};
+    for (const key of EDITABLE_FIELDS) {
+      fields[key] = null;
+    }
+    setExtractedData(fields);
+    setPdfName("手動入力");
+    setAnalysis(null);
+    setStep("preview");
   }
 
   function updateField(key: string, value: string) {
@@ -242,7 +355,15 @@ export default function ImportScreen() {
         }},
       ]);
     } catch (e) {
-      Alert.alert("エラー", e instanceof Error ? e.message : "保存に失敗しました");
+      const msg = e instanceof Error ? e.message : "保存に失敗しました";
+      if (msg.includes("上限") || msg.includes("アップグレード")) {
+        Alert.alert("保存制限", msg, [
+          { text: "閉じる", style: "cancel" },
+          { text: "Proを見る", onPress: () => router.push("/paywall" as any) },
+        ]);
+      } else {
+        Alert.alert("エラー", msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -250,9 +371,14 @@ export default function ImportScreen() {
 
   if (step === "select") {
     return (
-      <View style={styles.container}>
-        <View style={styles.selectContent}>
-          <FontAwesome name="file-pdf-o" size={64} color={theme.accent} />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.selectScrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* PDF取り込み */}
+        <View style={styles.selectCard}>
+          <FontAwesome name="file-pdf-o" size={40} color={theme.accent} />
           <Text style={styles.selectTitle}>マイソクPDFを読み込む</Text>
           <Text style={styles.selectDesc}>
             PDFを選択すると、AIが物件情報を自動で抽出します
@@ -262,7 +388,34 @@ export default function ImportScreen() {
             <Text style={styles.selectButtonText}>PDFを選択</Text>
           </TouchableOpacity>
         </View>
-      </View>
+
+        {/* スクショ取り込み */}
+        <View style={styles.selectCard}>
+          <FontAwesome name="camera" size={40} color="#10B981" />
+          <Text style={styles.selectTitle}>スクショから読み込む</Text>
+          <Text style={styles.selectDesc}>
+            物件ページのスクリーンショットから{"\n"}
+            AIが物件情報を自動抽出します
+          </Text>
+          <TouchableOpacity style={[styles.selectButton, { backgroundColor: "#10B981" }]} onPress={handlePickImage}>
+            <FontAwesome name="image" size={18} color="#fff" />
+            <Text style={styles.selectButtonText}>写真を選択</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 手動入力 */}
+        <View style={styles.selectCard}>
+          <FontAwesome name="pencil-square-o" size={40} color={theme.textSecondary} />
+          <Text style={styles.selectTitle}>手動で入力</Text>
+          <Text style={styles.selectDesc}>
+            物件情報を直接入力して登録します
+          </Text>
+          <TouchableOpacity style={[styles.selectButton, { backgroundColor: theme.textSecondary }]} onPress={handleManualEntry}>
+            <FontAwesome name="edit" size={18} color="#fff" />
+            <Text style={styles.selectButtonText}>入力フォームを開く</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     );
   }
 
@@ -272,7 +425,7 @@ export default function ImportScreen() {
         <View style={styles.selectContent}>
           <ActivityIndicator size="large" color={theme.accent} />
           <Text style={styles.loadingTitle}>AI解析中...</Text>
-          <Text style={styles.loadingDesc}>{pdfName}</Text>
+          <Text style={styles.loadingDesc} numberOfLines={2}>{pdfName}</Text>
           <Text style={styles.loadingDesc}>
             物件情報を抽出しています。しばらくお待ちください。
           </Text>
@@ -292,6 +445,16 @@ export default function ImportScreen() {
         <Text style={styles.previewDesc}>
           内容を確認・編集して保存してください
         </Text>
+        {/* マイソク原本確認ボタン */}
+        {localPdfPath ? (
+          <TouchableOpacity
+            style={styles.maisokuButton}
+            onPress={() => Linking.openURL(localPdfPath)}
+          >
+            <FontAwesome name="file-text-o" size={14} color="#fff" />
+            <Text style={styles.maisokuButtonText}>マイソクPDFを開く</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {/* AI分析セクション */}
@@ -430,7 +593,7 @@ export default function ImportScreen() {
         </View>
       ))}
 
-      {/* 実質利回り（自動計算） */}
+      {/* 利回り（自動計算） */}
       {(() => {
         const price = Number(extractedData.price);
         const rent = Number(extractedData.monthlyRent);
@@ -438,14 +601,27 @@ export default function ImportScreen() {
         const repair = Number(extractedData.repairReserve) || 0;
         const other = Number(extractedData.otherMonthlyExpenses) || 0;
         if (price > 0 && rent > 0) {
+          const grossYield = extractedData.grossYield != null
+            ? Number(extractedData.grossYield)
+            : (rent * 12) / (price * 10000) * 100;
           const netYield = ((rent - mgmt - repair - other) * 12) / (price * 10000) * 100;
           return (
-            <View style={styles.fieldRow}>
-              <Text style={styles.fieldLabel}>実質利回り（自動計算）</Text>
-              <View style={styles.computedField}>
-                <Text style={styles.computedValue}>{netYield.toFixed(2)}%</Text>
+            <>
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLabel}>
+                  表面利回り{extractedData.grossYield == null ? "（自動計算）" : ""}
+                </Text>
+                <View style={styles.computedField}>
+                  <Text style={styles.computedValue}>{grossYield.toFixed(2)}%</Text>
+                </View>
               </View>
-            </View>
+              <View style={styles.fieldRow}>
+                <Text style={styles.fieldLabel}>実質利回り（自動計算）</Text>
+                <View style={styles.computedField}>
+                  <Text style={styles.computedValue}>{netYield.toFixed(2)}%</Text>
+                </View>
+              </View>
+            </>
           );
         }
         return null;
@@ -478,6 +654,66 @@ export default function ImportScreen() {
         </Text>
       </View>
 
+      {/* 公的取引相場（国土交通省） */}
+      {reinfolibLoading && (
+        <View style={[styles.fieldRow, { alignItems: "center" }]}>
+          <ActivityIndicator size="small" color="#0891B2" />
+          <Text style={[styles.fieldLabel, { marginTop: 4, color: "#0891B2" }]}>取引相場を照会中...</Text>
+        </View>
+      )}
+      {reinfolibMarket && !reinfolibLoading && (
+        <View style={[styles.analysisSection, { borderLeftColor: "#0891B2", borderLeftWidth: 3 }]}>
+          <View style={styles.analysisTitleRow}>
+            <FontAwesome name="bank" size={14} color="#0891B2" />
+            <Text style={[styles.analysisSectionTitle, { color: "#0891B2" }]}>
+              公的取引相場（{reinfolibMarket.count}件）
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+            <View>
+              <Text style={{ fontSize: 10, color: theme.textMuted }}>平均㎡単価</Text>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>{Math.round(reinfolibMarket.avg_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+            </View>
+            <View>
+              <Text style={{ fontSize: 10, color: theme.textMuted }}>中央値</Text>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: theme.textSecondary }}>{Math.round(reinfolibMarket.median_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+            </View>
+            <View>
+              <Text style={{ fontSize: 10, color: theme.textMuted }}>平均総額</Text>
+              <Text style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>{Math.round(reinfolibMarket.avg_total_price / 10000).toLocaleString()}万円</Text>
+            </View>
+          </View>
+          {/* この物件との比較 */}
+          {(() => {
+            const price = Number(extractedData.price);
+            const area = Number(extractedData.area);
+            if (price > 0 && area > 0) {
+              const propertyM2 = (price * 10000) / area;
+              const diffPct = ((propertyM2 - reinfolibMarket.avg_price_m2) / reinfolibMarket.avg_price_m2) * 100;
+              const isBelow = diffPct < -5;
+              const isAbove = diffPct > 5;
+              return (
+                <View style={{
+                  backgroundColor: isBelow ? "rgba(76,175,80,0.15)" : isAbove ? "rgba(244,67,54,0.15)" : "rgba(255,193,7,0.15)",
+                  borderRadius: 8, padding: 8, marginTop: 6,
+                }}>
+                  <Text style={{
+                    fontSize: 12, fontWeight: "600", textAlign: "center",
+                    color: isBelow ? "#4CAF50" : isAbove ? "#F44336" : "#FFC107",
+                  }}>
+                    公的データ比 {diffPct > 0 ? "+" : ""}{diffPct.toFixed(1)}%（{isBelow ? "割安" : isAbove ? "割高" : "適正"}）
+                  </Text>
+                </View>
+              );
+            }
+            return null;
+          })()}
+          <Text style={{ fontSize: 9, color: theme.textMuted, marginTop: 6 }}>
+            出典: {reinfolibMarket.source}（{reinfolibMarket.period}）
+          </Text>
+        </View>
+      )}
+
       <View style={styles.buttonRow}>
         <TouchableOpacity
           style={styles.cancelButton}
@@ -486,6 +722,8 @@ export default function ImportScreen() {
             setExtractedData({});
             setEquipment([]);
             setAnalysis(null);
+            setReinfolibMarket(null);
+            setReinfolibLoading(false);
           }}
         >
           <Text style={styles.cancelText}>キャンセル</Text>
@@ -515,14 +753,29 @@ const styles = StyleSheet.create({
     padding: 24,
     gap: 16,
   },
+  selectScrollContent: {
+    padding: 16,
+    paddingTop: 24,
+    paddingBottom: 40,
+    gap: 16,
+  },
+  selectCard: {
+    backgroundColor: theme.bgCard,
+    borderRadius: 16,
+    padding: 24,
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
   selectTitle: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: "bold",
     color: theme.text,
-    marginTop: 8,
+    marginTop: 4,
   },
   selectDesc: {
-    fontSize: 14,
+    fontSize: 13,
     color: theme.textSecondary,
     textAlign: "center",
     lineHeight: 20,
@@ -535,8 +788,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 14,
     borderRadius: 12,
-    marginTop: 12,
+    marginTop: 4,
   },
+
   selectButtonText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
   loadingTitle: {
     fontSize: 18,
@@ -558,6 +812,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   previewDesc: { fontSize: 13, color: theme.textSecondary },
+  maisokuButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: theme.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  maisokuButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
   // AI分析セクション
   analysisSection: {
     marginBottom: 20,

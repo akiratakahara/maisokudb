@@ -15,7 +15,18 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.maisokudb.app"
+      "bundleIdentifier": "com.maisokudb.app",
+      "buildNumber": "18",
+      "infoPlist": {
+        "NSCameraUsageDescription": "物件写真を撮影するためにカメラを使用します",
+        "NSPhotoLibraryUsageDescription": "物件画像をアップロードするために写真ライブラリを使用します",
+        "CFBundleLocalizations": [
+          "ja",
+          "ja"
+        ],
+        "CFBundleDevelopmentRegion": "ja",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -32,10 +43,18 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "react-native-iap"
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "983ff559-b35c-45c5-890d-dfdb817c36bd"
+      }
+    },
+    "owner": "akiratakahara"
   }
 }

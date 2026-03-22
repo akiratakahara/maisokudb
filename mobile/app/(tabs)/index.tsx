@@ -9,11 +9,12 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
+  ScrollView,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { useAuth } from "@/lib/auth-context";
-import { api, Property, INVESTMENT_STATUSES } from "@/lib/api";
+import { api, Property, LoanPreset, INVESTMENT_STATUSES, matchesLoanPreset } from "@/lib/api";
 import { theme } from "@/constants/Colors";
 
 const SORT_OPTIONS = [
@@ -22,9 +23,31 @@ const SORT_OPTIONS = [
   { label: "利回り順", value: "netYield" },
   { label: "面積順", value: "area" },
   { label: "築年数順", value: "builtDate" },
+  { label: "駅近順", value: "walkMinutes" },
 ];
 
-const LAYOUT_OPTIONS = ["1K", "1LDK", "2K", "2LDK", "3LDK", "4LDK"];
+const LAYOUT_OPTIONS = ["1R", "1K", "1DK", "1LDK", "2K", "2DK", "2LDK", "3LDK", "4LDK"];
+
+const WALK_OPTIONS = [
+  { label: "指定なし", value: "" },
+  { label: "5分以内", value: "5" },
+  { label: "10分以内", value: "10" },
+  { label: "15分以内", value: "15" },
+];
+
+const STRUCTURE_OPTIONS = ["RC", "SRC", "鉄骨", "木造"];
+
+const YIELD_OPTIONS = [
+  { label: "指定なし", value: "" },
+  { label: "5%以上", value: "5" },
+  { label: "7%以上", value: "7" },
+  { label: "10%以上", value: "10" },
+];
+
+function calcGrossYield(p: Property): number | null {
+  if (!p.price || p.price <= 0 || p.monthlyRent == null) return null;
+  return p.grossYield != null ? p.grossYield : (p.monthlyRent * 12) / (p.price * 10000) * 100;
+}
 
 function calcNetYield(p: Property): number | null {
   if (!p.price || p.price <= 0 || p.monthlyRent == null) return null;
@@ -46,6 +69,11 @@ export default function HomeScreen() {
   const [filterMinArea, setFilterMinArea] = useState("");
   const [filterMaxArea, setFilterMaxArea] = useState("");
   const [filterStatus, setFilterStatus] = useState<string | null>(null);
+  const [loanPresets, setLoanPresets] = useState<LoanPreset[]>([]);
+  const [filterLoanPresetId, setFilterLoanPresetId] = useState<number | null>(null);
+  const [filterMaxWalk, setFilterMaxWalk] = useState("");
+  const [filterStructure, setFilterStructure] = useState("");
+  const [filterMinYield, setFilterMinYield] = useState("");
   const [error, setError] = useState("");
 
   const fetchProperties = useCallback(async () => {
@@ -54,7 +82,11 @@ export default function HomeScreen() {
       return;
     }
     try {
-      const params: Record<string, string> = { sortBy: sortBy === "netYield" ? "createdAt" : sortBy, sortOrder: sortBy === "netYield" ? "desc" : sortOrder };
+      const clientSortKeys = ["netYield", "walkMinutes"];
+      const params: Record<string, string> = {
+        sortBy: clientSortKeys.includes(sortBy) ? "createdAt" : sortBy,
+        sortOrder: clientSortKeys.includes(sortBy) ? "desc" : sortOrder,
+      };
       if (search) params.search = search;
       if (filterLayout) params.layout = filterLayout;
       if (filterMinPrice) params.minPrice = filterMinPrice;
@@ -66,13 +98,74 @@ export default function HomeScreen() {
       const res = await api.getProperties(params);
       let items = res.properties;
 
-      // 実質利回りはクライアント側で計算・ソート
+      // クライアント側フィルタ: 駅徒歩
+      if (filterMaxWalk) {
+        const maxW = parseInt(filterMaxWalk, 10);
+        items = items.filter(p => p.walkMinutes != null && p.walkMinutes <= maxW);
+      }
+
+      // クライアント側フィルタ: 構造
+      if (filterStructure) {
+        items = items.filter(p => p.structure && p.structure.includes(filterStructure));
+      }
+
+      // クライアント側フィルタ: 最低利回り
+      if (filterMinYield) {
+        const minY = parseFloat(filterMinYield);
+        items = items.filter(p => {
+          const y = calcNetYield(p);
+          return y != null && y >= minY;
+        });
+      }
+
+      // クライアント側ソート
       if (sortBy === "netYield") {
         items = [...items].sort((a, b) => {
           const ya = calcNetYield(a) ?? -Infinity;
           const yb = calcNetYield(b) ?? -Infinity;
           return sortOrder === "desc" ? yb - ya : ya - yb;
         });
+      } else if (sortBy === "walkMinutes") {
+        items = [...items].sort((a, b) => {
+          const wa = a.walkMinutes ?? Infinity;
+          const wb = b.walkMinutes ?? Infinity;
+          return sortOrder === "asc" ? wa - wb : wb - wa;
+        });
+      }
+
+      // 物件が0件の場合、デモ物件をシード
+      if (items.length === 0 && !search && !filterStatus) {
+        try {
+          const seedResult = await api.seedDemo();
+          if (seedResult.created > 0) {
+            const res2 = await api.getProperties(params);
+            items = res2.properties;
+          }
+        } catch {
+          // デモシード失敗は無視
+        }
+      }
+
+      // ローンプリセットをロード（初回のみ）
+      if (loanPresets.length === 0) {
+        try {
+          const presetData = await api.getLoanPresets();
+          if (presetData.length === 0) {
+            await api.seedSystemPresets();
+            const seeded = await api.getLoanPresets();
+            setLoanPresets(seeded);
+          } else {
+            setLoanPresets(presetData);
+          }
+        } catch { /* ignore */ }
+      }
+
+      // ローンプリセットフィルタ（クライアント側）
+      if (filterLoanPresetId != null) {
+        const preset = loanPresets.find(p => p.id === filterLoanPresetId);
+        if (preset) {
+          items = items.filter(p => matchesLoanPreset(p, preset).matches);
+        }
       }
 
       setProperties(items);
@@ -84,7 +177,7 @@ export default function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus]);
+  }, [user, authLoading, search, sortBy, sortOrder, filterLayout, filterMinPrice, filterMaxPrice, filterMinArea, filterMaxArea, filterStatus, filterLoanPresetId, filterMaxWalk, filterStructure, filterMinYield]);
 
   useFocusEffect(
     useCallback(() => {
@@ -101,6 +194,25 @@ export default function HomeScreen() {
     setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
   }
 
+  const activeFilterCount = [
+    filterLayout, filterMinPrice, filterMaxPrice,
+    filterMinArea, filterMaxArea, filterMaxWalk,
+    filterStructure, filterMinYield,
+  ].filter(Boolean).length + (filterStatus ? 1 : 0) + (filterLoanPresetId ? 1 : 0);
+
+  function clearAllFilters() {
+    setFilterLayout("");
+    setFilterMinPrice("");
+    setFilterMaxPrice("");
+    setFilterMinArea("");
+    setFilterMaxArea("");
+    setFilterMaxWalk("");
+    setFilterStructure("");
+    setFilterMinYield("");
+    setFilterStatus(null);
+    setFilterLoanPresetId(null);
+  }
+
   function formatPrice(price: number | null): string {
     if (!price) return "—";
     if (price >= 10000) return `${(price / 10000).toFixed(1)}億円`;
@@ -108,6 +220,7 @@ export default function HomeScreen() {
   }
 
   function renderProperty({ item }: { item: Property }) {
+    const grossYield = calcGrossYield(item);
     const netYield = calcNetYield(item);
     return (
       <TouchableOpacity
@@ -117,6 +230,11 @@ export default function HomeScreen() {
       >
         <View style={styles.cardHeader}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1 }}>
+            {item.isDemo && (
+              <View style={[styles.cardStatusBadge, { backgroundColor: "#E0E0E0" }]}>
+                <Text style={[styles.cardStatusText, { color: "#757575" }]}>デモ</Text>
+              </View>
+            )}
             {item.investmentStatus && (() => {
               const s = INVESTMENT_STATUSES.find((st) => st.key === item.investmentStatus);
               return s ? (
@@ -126,17 +244,17 @@ export default function HomeScreen() {
               ) : null;
             })()}
             <Text style={[styles.cardName, { flex: 1 }]} numberOfLines={1}>
-              {item.name}
+              {item.name && item.name !== "無題の物件" ? item.name : (item.address || item.nearestStation ? `${item.nearestStation || ""}周辺` : item.city || "無題の物件")}
             </Text>
           </View>
           <Text style={styles.cardPrice}>{formatPrice(item.price)}</Text>
         </View>
         {/* 利回り */}
-        {(item.grossYield != null || netYield != null) && (
+        {(grossYield != null || netYield != null) && (
           <View style={styles.yieldRow}>
-            {item.grossYield != null && (
+            {grossYield != null && (
               <Text style={styles.yieldText}>
-                表面 <Text style={styles.yieldNum}>{item.grossYield.toFixed(2)}%</Text>
+                表面 <Text style={styles.yieldNum}>{grossYield.toFixed(2)}%</Text>
               </Text>
             )}
             {netYield != null && (
@@ -211,12 +329,29 @@ export default function HomeScreen() {
           />
         </View>
         <TouchableOpacity
-          style={styles.filterButton}
+          style={[styles.filterButton, activeFilterCount > 0 && { borderColor: theme.accent }]}
           onPress={() => setFilterVisible(true)}
         >
-          <FontAwesome name="sliders" size={18} color={theme.text} />
+          <FontAwesome name="sliders" size={18} color={activeFilterCount > 0 ? theme.accent : theme.text} />
+          {activeFilterCount > 0 && (
+            <View style={styles.filterBadge}>
+              <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
+
+      {/* 件数表示 */}
+      {!loading && (
+        <View style={styles.countRow}>
+          <Text style={styles.countText}>{properties.length}件の物件</Text>
+          {activeFilterCount > 0 && (
+            <TouchableOpacity onPress={clearAllFilters}>
+              <Text style={styles.clearAllText}>フィルタをクリア</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Status Filter */}
       <View style={styles.statusFilterRow}>
@@ -242,6 +377,34 @@ export default function HomeScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Loan Preset Filter */}
+      {loanPresets.length > 0 && (
+        <View style={styles.statusFilterRow}>
+          <TouchableOpacity
+            style={[styles.statusFilterChip, !filterLoanPresetId && styles.loanFilterChipDefault]}
+            onPress={() => setFilterLoanPresetId(null)}
+          >
+            <FontAwesome name="bank" size={10} color={!filterLoanPresetId ? "#3B82F6" : theme.textMuted} />
+            <Text style={[styles.statusFilterText, !filterLoanPresetId && { color: "#3B82F6" }]}>融資条件なし</Text>
+          </TouchableOpacity>
+          {loanPresets.map((lp) => (
+            <TouchableOpacity
+              key={lp.id}
+              style={[
+                styles.statusFilterChip,
+                filterLoanPresetId === lp.id && { backgroundColor: "#3B82F6", borderColor: "#3B82F6" },
+              ]}
+              onPress={() => setFilterLoanPresetId(filterLoanPresetId === lp.id ? null : lp.id)}
+            >
+              <FontAwesome name="check-circle" size={10} color={filterLoanPresetId === lp.id ? "#fff" : theme.textMuted} />
+              <Text style={[styles.statusFilterText, filterLoanPresetId === lp.id && { color: "#fff" }]}>
+                {lp.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Sort Bar */}
       <View style={styles.sortRow}>
@@ -333,6 +496,7 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>フィルタ</Text>
+            <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false}>
 
             <Text style={styles.filterLabel}>間取り</Text>
             <View style={styles.layoutRow}>
@@ -415,6 +579,51 @@ export default function HomeScreen() {
               />
             </View>
 
+            <Text style={styles.filterLabel}>駅徒歩</Text>
+            <View style={styles.layoutRow}>
+              {WALK_OPTIONS.map((w) => (
+                <TouchableOpacity
+                  key={w.value}
+                  style={[styles.layoutChip, filterMaxWalk === w.value && styles.layoutChipActive]}
+                  onPress={() => setFilterMaxWalk(filterMaxWalk === w.value ? "" : w.value)}
+                >
+                  <Text style={[styles.layoutChipText, filterMaxWalk === w.value && styles.layoutChipTextActive]}>{w.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.filterLabel}>構造</Text>
+            <View style={styles.layoutRow}>
+              <TouchableOpacity
+                style={[styles.layoutChip, !filterStructure && styles.layoutChipActive]}
+                onPress={() => setFilterStructure("")}
+              >
+                <Text style={[styles.layoutChipText, !filterStructure && styles.layoutChipTextActive]}>すべて</Text>
+              </TouchableOpacity>
+              {STRUCTURE_OPTIONS.map((s) => (
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.layoutChip, filterStructure === s && styles.layoutChipActive]}
+                  onPress={() => setFilterStructure(filterStructure === s ? "" : s)}
+                >
+                  <Text style={[styles.layoutChipText, filterStructure === s && styles.layoutChipTextActive]}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.filterLabel}>最低実質利回り</Text>
+            <View style={styles.layoutRow}>
+              {YIELD_OPTIONS.map((y) => (
+                <TouchableOpacity
+                  key={y.value}
+                  style={[styles.layoutChip, filterMinYield === y.value && styles.layoutChipActive]}
+                  onPress={() => setFilterMinYield(filterMinYield === y.value ? "" : y.value)}
+                >
+                  <Text style={[styles.layoutChipText, filterMinYield === y.value && styles.layoutChipTextActive]}>{y.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalClearButton}
@@ -424,6 +633,9 @@ export default function HomeScreen() {
                   setFilterMaxPrice("");
                   setFilterMinArea("");
                   setFilterMaxArea("");
+                  setFilterMaxWalk("");
+                  setFilterStructure("");
+                  setFilterMinYield("");
                 }}
               >
                 <Text style={styles.modalClearText}>クリア</Text>
@@ -438,6 +650,7 @@ export default function HomeScreen() {
                 <Text style={styles.modalApplyText}>適用</Text>
               </TouchableOpacity>
             </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -506,6 +719,10 @@ const styles = StyleSheet.create({
   },
   statusFilterTextActive: {
     color: theme.accent,
+  },
+  loanFilterChipDefault: {
+    borderColor: "#3B82F6",
+    backgroundColor: "rgba(59, 130, 246, 0.08)",
   },
   cardStatusBadge: {
     paddingHorizontal: 6,
@@ -696,4 +913,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalApplyText: { color: "#fff", fontSize: 15, fontWeight: "bold" },
+  filterBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    backgroundColor: theme.accent,
+    borderRadius: 9,
+    width: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  filterBadgeText: {
+    fontSize: 10,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  countRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    marginBottom: 6,
+  },
+  countText: {
+    fontSize: 12,
+    color: theme.textMuted,
+  },
+  clearAllText: {
+    fontSize: 12,
+    color: theme.accent,
+  },
 });

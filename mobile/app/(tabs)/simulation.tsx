@@ -22,6 +22,7 @@ import {
   CompareRequest,
   SimulationRequest,
   SimulationResult,
+  SavedSimulationCreate,
 } from "@/lib/api";
 import { loadInvestorProfile } from "./settings";
 
@@ -45,6 +46,7 @@ type ScreenState = "input" | "compare" | "detail";
 
 export default function SimulationScreen() {
   const params = useLocalSearchParams<{
+    property_id?: string;
     property_price?: string;
     monthly_rent?: string;
     management_fee?: string;
@@ -239,6 +241,55 @@ export default function SimulationScreen() {
       Alert.alert("エラー", err.message || "シミュレーションに失敗しました");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSaveSimulation() {
+    if (!simulationResult) return;
+    const r = simulationResult;
+    const price = parseFloat(propertyPrice);
+    const rent = parseFloat(monthlyRent);
+
+    const annualCf = r.yearly_plans.length > 1
+      ? r.yearly_plans[1].annual_balance
+      : r.yearly_plans[0]?.annual_balance ?? 0;
+    const monthlyCf = Math.round(annualCf / 12);
+
+    const label = `${selectedBankName} @ ${formatManYen(price)}`;
+
+    const body: SavedSimulationCreate = {
+      property_id: params.property_id ? parseInt(params.property_id, 10) : undefined,
+      label,
+      property_price: price,
+      monthly_rent: rent,
+      management_fee: parseFloat(managementFee) || 0,
+      repair_reserve: parseFloat(repairReserve) || 0,
+      built_year: parseInt(builtYear, 10) || undefined,
+      structure: structure || undefined,
+      bank_name: selectedBankName,
+      interest_rate: r.interest_rate,
+      loan_years: r.loan_years,
+      down_payment: r.down_payment,
+      loan_amount: r.loan_amount,
+      buyer_age: parseInt(buyerAge, 10) || undefined,
+      monthly_payment: r.monthly_payment,
+      monthly_cf: monthlyCf,
+      annual_cf: annualCf,
+      gross_yield: r.gross_yield,
+      net_yield: r.net_yield,
+      roi: r.roi,
+      total_payment: r.total_payment,
+      total_interest: r.total_interest,
+      initial_costs: r.initial_costs.total,
+      payback_years: r.payback_years ?? undefined,
+      result_json: r,
+    };
+
+    try {
+      await api.saveSimulation(body);
+      Alert.alert("保存完了", "シミュレーション結果を保存しました");
+    } catch (err: any) {
+      Alert.alert("エラー", err.message || "保存に失敗しました");
     }
   }
 
@@ -481,6 +532,7 @@ export default function SimulationScreen() {
         <View style={styles.disclaimerBox}>
           <FontAwesome name="info-circle" size={13} color={theme.textMuted} />
           <Text style={styles.disclaimerText}>
+            金融機関名はカテゴリ別の仮名で表示しています。
             この結果は一般的な融資基準に基づく参考情報であり、実際の審査結果を保証するものではありません。
             詳細は各金融機関にお問い合わせください。
           </Text>
@@ -901,9 +953,23 @@ export default function SimulationScreen() {
           </View>
         </View>
 
+        {/* Save Button */}
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={handleSaveSimulation}
+        >
+          <FontAwesome
+            name="floppy-o"
+            size={14}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.primaryButtonText}>この結果を保存</Text>
+        </TouchableOpacity>
+
         {/* Back Button */}
         <TouchableOpacity
-          style={styles.secondaryButton}
+          style={[styles.secondaryButton, { marginTop: 8 }]}
           onPress={() => {
             setSimulationResult(null);
             setScreenState("compare");

@@ -13,6 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { router } from "expo-router";
 import { useAuth } from "@/lib/auth-context";
+import { useSubscription } from "@/lib/subscription-context";
 import { theme } from "@/constants/Colors";
 
 export interface InvestorProfile {
@@ -36,6 +37,7 @@ export async function loadInvestorProfile(): Promise<InvestorProfile | null> {
 
 export default function SettingsScreen() {
   const { user, loading: authLoading, logout } = useAuth();
+  const { isPro, monthlyProduct, restore, status } = useSubscription();
 
   // Profile state
   const [age, setAge] = useState("");
@@ -195,6 +197,52 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Loan Presets Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>融資条件</Text>
+        <TouchableOpacity
+          style={styles.card}
+          onPress={() => router.push("/loan-presets" as any)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <FontAwesome name="bank" size={18} color={theme.accent} />
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.text }}>融資条件管理</Text>
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                  ローン条件を保存・物件フィルタに活用
+                </Text>
+              </View>
+            </View>
+            <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      {/* Portfolio Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>ポートフォリオ</Text>
+        <TouchableOpacity
+          style={styles.card}
+          onPress={() => router.push("/portfolio" as any)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <FontAwesome name="pie-chart" size={18} color="#4CAF50" />
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: "600", color: theme.text }}>ポートフォリオサマリー</Text>
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                  購入済物件の合計CF・利回り・借入残高
+                </Text>
+              </View>
+            </View>
+            <FontAwesome name="chevron-right" size={14} color={theme.textMuted} />
+          </View>
+        </TouchableOpacity>
+      </View>
+
       {/* Plan Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>プラン</Text>
@@ -203,65 +251,51 @@ export default function SettingsScreen() {
             <View
               style={[
                 styles.planBadge,
-                user.plan === "pro" && styles.planBadgePro,
+                isPro && styles.planBadgePro,
               ]}
             >
               <Text
                 style={[
                   styles.planBadgeText,
-                  user.plan === "pro" && styles.planBadgeTextPro,
+                  isPro && styles.planBadgeTextPro,
                 ]}
               >
-                {user.plan === "pro" ? "Pro" : "Free"}
+                {isPro ? "Pro" : "Free"}
               </Text>
             </View>
             <View style={styles.planInfo}>
               <Text style={styles.planDesc}>
-                {user.plan === "pro"
-                  ? "無制限プラン（¥1,480/月）"
+                {isPro
+                  ? `Proプラン利用中${status.productId?.includes("yearly") ? "（年額）" : status.productId?.includes("monthly") ? "（月額）" : ""}`
                   : "月10回AI抽出 / 50物件保存"}
               </Text>
             </View>
           </View>
-          {user.plan === "free" && (
+          {!isPro && (
             <>
-              <View style={styles.subscriptionInfo}>
-                <Text style={styles.subscriptionTitle}>MaisokuDB Pro</Text>
-                <Text style={styles.subscriptionDetail}>期間: 1ヶ月（自動更新）</Text>
-                <Text style={styles.subscriptionDetail}>料金: ¥1,480 / 月</Text>
-                <Text style={styles.subscriptionDetail}>・AI解析 無制限</Text>
-                <Text style={styles.subscriptionDetail}>・物件保存 無制限</Text>
-                <Text style={styles.subscriptionDetail}>・収益シミュレーション</Text>
-              </View>
               <TouchableOpacity
                 style={styles.upgradeButton}
-                onPress={() =>
-                  Alert.alert(
-                    "Proプランにアップグレード",
-                    "¥1,480/月でAI解析・物件保存・収益シミュレーションが無制限になります。\n\nApp Storeの課金ページへ移動しますか？",
-                    [
-                      { text: "キャンセル", style: "cancel" },
-                      {
-                        text: "アップグレードする",
-                        onPress: () =>
-                          Linking.openURL("https://apps.apple.com/app/maisokudb"),
-                      },
-                    ]
-                  )
-                }
+                onPress={() => router.push("/paywall" as any)}
               >
-                <Text style={styles.upgradeText}>Proにアップグレード（¥1,480/月）</Text>
+                <Text style={styles.upgradeText}>
+                  Proにアップグレード
+                </Text>
               </TouchableOpacity>
-              <View style={styles.legalLinks}>
-                <TouchableOpacity onPress={() => Linking.openURL("https://maisoku-db.com/terms")}>
-                  <Text style={styles.legalLink}>利用規約</Text>
-                </TouchableOpacity>
-                <Text style={styles.legalSep}>　|　</Text>
-                <TouchableOpacity onPress={() => Linking.openURL("https://maisoku-db.com/privacy")}>
-                  <Text style={styles.legalLink}>プライバシーポリシー</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.restoreLink}
+                onPress={restore}
+              >
+                <Text style={styles.restoreLinkText}>購入を復元</Text>
+              </TouchableOpacity>
             </>
+          )}
+          {isPro && (
+            <TouchableOpacity
+              style={styles.manageSubButton}
+              onPress={() => Linking.openURL("https://apps.apple.com/account/subscriptions")}
+            >
+              <Text style={styles.manageSubText}>サブスクリプションを管理</Text>
+            </TouchableOpacity>
           )}
         </View>
       </View>
@@ -275,10 +309,10 @@ export default function SettingsScreen() {
             <Text style={styles.usageLabel}>今月のAI利用回数</Text>
             <Text style={styles.usageValue}>
               {user.aiUsageCount ?? 0}
-              {user.plan === "free" ? " / 10回" : "回"}
+              {!isPro ? " / 10回" : "回"}
             </Text>
           </View>
-          {user.plan === "free" && (
+          {!isPro && (
             <View style={styles.usageBar}>
               <View
                 style={[
@@ -465,6 +499,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
   },
+  restoreLink: {
+    paddingVertical: 8,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  restoreLinkText: {
+    color: theme.textSecondary,
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
+  manageSubButton: {
+    paddingVertical: 8,
+    alignItems: "center",
+    marginTop: 4,
+  },
+  manageSubText: {
+    color: theme.accent,
+    fontSize: 13,
+  },
   usageRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -523,37 +576,5 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 15,
     fontWeight: "600",
-  },
-  subscriptionInfo: {
-    backgroundColor: theme.bgInput,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  subscriptionTitle: {
-    fontSize: 15,
-    fontWeight: "bold",
-    color: theme.text,
-    marginBottom: 6,
-  },
-  subscriptionDetail: {
-    fontSize: 13,
-    color: theme.textSecondary,
-    marginBottom: 2,
-  },
-  legalLinks: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 10,
-  },
-  legalLink: {
-    fontSize: 12,
-    color: theme.accent,
-    textDecorationLine: "underline",
-  },
-  legalSep: {
-    fontSize: 12,
-    color: theme.textMuted,
   },
 });

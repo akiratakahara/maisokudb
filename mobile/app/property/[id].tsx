@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,11 +9,13 @@ import {
   TextInput,
   ActivityIndicator,
   Share,
+  Platform,
 } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { File } from "expo-file-system";
-import { api, Property, PropertyAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable, INVESTMENT_STATUSES } from "@/lib/api";
+import MapView, { Marker, Circle, Polygon } from "react-native-maps";
+import { api, Property, PropertyAnalysis, PropertyScore, RentAnalysis, LandPricePoint, MarketComparison, ExitPrediction, InternalRentComparable, LoanPreset, SavedSimulationItem, INVESTMENT_STATUSES, matchesLoanPreset, ReinfolibTransactions, ReinfolibAreaInfo, CommunityComparable, CommunityMarketStats } from "@/lib/api";
 import { isInCompareList, toggleCompareItem } from "@/lib/compare-store";
 import { theme } from "@/constants/Colors";
 
@@ -76,6 +78,7 @@ export default function PropertyDetailScreen() {
   const [analysis, setAnalysis] = useState<PropertyAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  const [analysisDate, setAnalysisDate] = useState<string | null>(null);
   // 相場比較
   const [marketComparison, setMarketComparison] = useState<MarketComparison | null>(null);
   const [marketLoading, setMarketLoading] = useState(false);
@@ -86,17 +89,132 @@ export default function PropertyDetailScreen() {
   const [exitExpanded, setExitExpanded] = useState(false);
   // 比較リスト
   const [inCompare, setInCompare] = useState(false);
+  const [loanPresets, setLoanPresets] = useState<LoanPreset[]>([]);
+  // 保存済みシミュレーション
+  const [savedSims, setSavedSims] = useState<SavedSimulationItem[]>([]);
+  const [savedSimsExpanded, setSavedSimsExpanded] = useState(false);
+  // 物件スコア
+  const [propertyScore, setPropertyScore] = useState<PropertyScore | null>(null);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  // 賃料相場
+  const [rentAnalysis, setRentAnalysis] = useState<RentAnalysis | null>(null);
+  const [rentLoading, setRentLoading] = useState(false);
+  const [rentExpanded, setRentExpanded] = useState(false);
+  // 不動産情報ライブラリ（国土交通省）
+  const [reinfolibData, setReinfolibData] = useState<ReinfolibTransactions | null>(null);
+  const [reinfolibAreaInfo, setReinfolibAreaInfo] = useState<ReinfolibAreaInfo | null>(null);
+  const [reinfolibLoading, setReinfolibLoading] = useState(false);
+  const [reinfolibExpanded, setReinfolibExpanded] = useState(true);
+  // コミュニティデータ
+  const [communityStats, setCommunityStats] = useState<CommunityMarketStats | null>(null);
+  const [communityComparables, setCommunityComparables] = useState<CommunityComparable[]>([]);
+  const [communityLoading, setCommunityLoading] = useState(false);
+  const [communityExpanded, setCommunityExpanded] = useState(false);
 
   useEffect(() => {
     fetchProperty();
+    fetchScore();
+    fetchRentAnalysis();
+    fetchSavedAnalysis();
     isInCompareList(id).then(setInCompare);
+    api.getLoanPresets().then(setLoanPresets).catch(() => {});
+    api.getSavedSimulations(parseInt(id, 10)).then(setSavedSims).catch(() => {});
   }, [id]);
+
+  async function fetchScore() {
+    setScoreLoading(true);
+    try {
+      const res = await api.getPropertyScore(id);
+      setPropertyScore(res);
+    } catch {
+      // スコア取得失敗は無視
+    } finally {
+      setScoreLoading(false);
+    }
+  }
+
+  async function fetchRentAnalysis() {
+    setRentLoading(true);
+    try {
+      const res = await api.getRentAnalysis(id);
+      setRentAnalysis(res);
+    } catch {
+      // 取得失敗は無視
+    } finally {
+      setRentLoading(false);
+    }
+  }
+
+  async function fetchReinfolibData(p: Property) {
+    // 最寄駅がなければ公的データは取得不可
+    if (!p.nearestStation && !p.prefecture) return;
+    setReinfolibLoading(true);
+    try {
+      const builtYear = p.builtDate ? parseInt(p.builtDate.replace(/[^0-9]/g, "").slice(0, 4), 10) || undefined : undefined;
+
+      // 取引データ: prefecture+city があればそれを使い、なければ station_name で逆引き
+      const txPromise = api.getReinfolibTransactions({
+        prefecture: p.prefecture ?? undefined,
+        city: p.city ?? undefined,
+        station_name: p.nearestStation ?? undefined,
+        area_sqm: p.area ?? undefined,
+        built_year: builtYear,
+      }).catch(() => null);
+
+      // エリア情報: 住所優先、なければ駅名で取得（都道府県・市区町村も渡して精度向上）
+      const areaPromise = (p.address || p.nearestStation)
+        ? api.getReinfolibAreaInfo({
+            address: p.address ?? undefined,
+            station_name: p.nearestStation ?? undefined,
+            prefecture: p.prefecture ?? undefined,
+            city: p.city ?? undefined,
+          }).catch(() => null)
+        : Promise.resolve(null);
+
+      const [txResult, areaResult] = await Promise.all([txPromise, areaPromise]);
+      if (txResult) setReinfolibData(txResult);
+      if (areaResult) setReinfolibAreaInfo(areaResult);
+    } catch {
+      // 取得失敗は無視
+    } finally {
+      setReinfolibLoading(false);
+    }
+  }
+
+  async function fetchCommunityData(p: Property) {
+    if (!p.nearestStation && !p.city) return;
+    setCommunityLoading(true);
+    try {
+      const area = p.area ?? undefined;
+      const [stats, comps] = await Promise.all([
+        api.getCommunityMarketStats({
+          station_name: p.nearestStation ?? undefined,
+          prefecture: p.prefecture ?? undefined,
+          city: p.city ?? undefined,
+        }).catch(() => null),
+        api.getCommunityComparables({
+          station_name: p.nearestStation ?? undefined,
+          prefecture: p.prefecture ?? undefined,
+          city: p.city ?? undefined,
+          min_area: area ? area * 0.7 : undefined,
+          max_area: area ? area * 1.3 : undefined,
+          exclude_property_id: parseInt(id, 10),
+        }).catch(() => null),
+      ]);
+      if (stats) setCommunityStats(stats);
+      if (comps) setCommunityComparables(comps.comparables);
+    } catch {} finally {
+      setCommunityLoading(false);
+    }
+  }
 
   async function fetchProperty() {
     try {
       const res = await api.getProperty(id);
       setProperty(res.property);
       initEditData(res.property);
+      fetchReinfolibData(res.property);
+      fetchCommunityData(res.property);
     } catch (e) {
       Alert.alert("エラー", e instanceof Error ? e.message : "物件の取得に失敗しました");
     } finally {
@@ -145,6 +263,25 @@ export default function PropertyDetailScreen() {
     }
   }
 
+  async function fetchSavedAnalysis() {
+    try {
+      const saved = await api.getSavedAnalysis(id);
+      if (saved && !saved.status) {
+        setAnalysis(saved);
+        setAnalysisExpanded(true);
+        if ((saved as any).analyzed_at) {
+          setAnalysisDate((saved as any).analyzed_at);
+        }
+        if (saved.reference_data?.search_coords && !reinfolibAreaInfo) {
+          const { lat, lng } = saved.reference_data.search_coords;
+          api.getReinfolibAreaInfo({ lat, lng }).then(setReinfolibAreaInfo).catch(() => {});
+        }
+      }
+    } catch {
+      // 取得失敗は無視（未分析の場合含む）
+    }
+  }
+
   async function handleAnalysis() {
     if (!property) return;
     setAnalysisLoading(true);
@@ -171,6 +308,14 @@ export default function PropertyDetailScreen() {
         floors: property.floors ?? undefined,
       });
       setAnalysis(result);
+      // AI分析で取得した座標を使ってハザード・用途地域情報を取得
+      if (result.reference_data?.search_coords && !reinfolibAreaInfo) {
+        const { lat, lng } = result.reference_data.search_coords;
+        api.getReinfolibAreaInfo({ lat, lng }).then(setReinfolibAreaInfo).catch(() => {});
+      }
+      // 分析結果をDBに保存（バックグラウンドで）
+      setAnalysisDate(new Date().toISOString());
+      api.analyzeAndSave(id).catch(() => {});
     } catch (e) {
       console.error("Analysis error:", e);
       Alert.alert("分析エラー", e instanceof Error ? e.message : "分析に失敗しました。ネットワーク接続を確認してください。");
@@ -258,6 +403,45 @@ export default function PropertyDetailScreen() {
     }
   }
 
+  async function handleShareProperty() {
+    if (!property) return;
+    const lines: string[] = [];
+    lines.push(`【${property.name || "物件情報"}】`);
+    if (property.price) lines.push(`価格: ${property.price}万円`);
+    if (property.monthlyRent) lines.push(`月額賃料: ${property.monthlyRent.toLocaleString()}円`);
+    if (property.managementFee) lines.push(`管理費: ${property.managementFee.toLocaleString()}円/月`);
+    if (property.repairReserve) lines.push(`修繕積立金: ${property.repairReserve.toLocaleString()}円/月`);
+    if (property.layout) lines.push(`間取り: ${property.layout}`);
+    if (property.area) lines.push(`面積: ${property.area}㎡`);
+    if (property.structure) lines.push(`構造: ${property.structure}`);
+    if (property.builtDate) lines.push(`築年月: ${property.builtDate}`);
+    if (property.nearestStation) {
+      let st = `最寄駅: ${property.nearestStation}`;
+      if (property.walkMinutes) st += ` 徒歩${property.walkMinutes}分`;
+      lines.push(st);
+    }
+    if (property.address) lines.push(`所在地: ${property.address}`);
+    // 利回り（自動計算対応）
+    if (property.price && property.price > 0 && property.monthlyRent) {
+      const grossYield = property.grossYield != null
+        ? property.grossYield
+        : (property.monthlyRent * 12) / (property.price * 10000) * 100;
+      lines.push(`表面利回り: ${grossYield.toFixed(2)}%`);
+      const netYield = ((property.monthlyRent - (property.managementFee || 0) - (property.repairReserve || 0) - (property.otherMonthlyExpenses || 0)) * 12) / (property.price * 10000) * 100;
+      lines.push(`実質利回り: ${netYield.toFixed(2)}%`);
+    }
+    // スコアがあれば追加
+    if (propertyScore) {
+      lines.push(`\n投資スコア: ${Math.round(propertyScore.total)}/100 (ランク${propertyScore.rank})`);
+    }
+    lines.push("\n-- MaisokuDB で分析");
+    try {
+      await Share.share({ message: lines.join("\n") });
+    } catch {
+      // ユーザーがキャンセル
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -278,28 +462,92 @@ export default function PropertyDetailScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       {/* Header Card */}
       <View style={styles.headerCard}>
-        <Text style={styles.headerName}>{property.name}</Text>
-        <Text style={styles.headerPrice}>
-          {property.price ? `${property.price}万円` : "価格未定"}
-        </Text>
-
-        {/* 利回り表示 */}
-        {property.price && property.price > 0 && (
-          <View style={styles.yieldRow}>
-            {property.grossYield != null && (
-              <View style={styles.yieldItem}>
-                <Text style={styles.yieldLabel}>表面利回り</Text>
-                <Text style={styles.yieldValue}>{property.grossYield.toFixed(2)}%</Text>
-              </View>
-            )}
-            {property.monthlyRent != null && (
-              <View style={styles.yieldItem}>
-                <Text style={styles.yieldLabel}>実質利回り</Text>
-                <Text style={[styles.yieldValue, styles.yieldValueNet]}>
-                  {(((property.monthlyRent - (property.managementFee || 0) - (property.repairReserve || 0) - (property.otherMonthlyExpenses || 0)) * 12) / (property.price * 10000) * 100).toFixed(2)}%
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={styles.headerName}>{property.name}</Text>
+          {property.isDemo && (
+            <View style={{ backgroundColor: "#E0E0E0", borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+              <Text style={{ fontSize: 11, color: "#757575", fontWeight: "600" }}>デモ物件</Text>
+            </View>
+          )}
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+          <Text style={styles.headerPrice}>
+            {property.price ? `${property.price}万円` : "価格未定"}
+          </Text>
+          {propertyScore && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={[{
+                backgroundColor: propertyScore.rank === "S" ? "#F59E0B" :
+                  propertyScore.rank === "A" ? "#22C55E" :
+                  propertyScore.rank === "B" ? "#3B82F6" :
+                  propertyScore.rank === "C" ? "#F97316" : "#EF4444",
+                borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+              }]}>
+                <Text style={{ fontSize: 14, fontWeight: "800", color: "#fff" }}>
+                  {Math.round(propertyScore.total)}点 {propertyScore.rank}
                 </Text>
               </View>
-            )}
+            </View>
+          )}
+        </View>
+
+        {/* 利回り表示（自動計算対応） */}
+        {property.price && property.price > 0 && property.monthlyRent != null && (
+          <View style={styles.yieldRow}>
+            <View style={styles.yieldItem}>
+              <Text style={styles.yieldLabel}>表面利回り</Text>
+              <Text style={styles.yieldValue}>
+                {(property.grossYield != null
+                  ? property.grossYield
+                  : (property.monthlyRent * 12) / (property.price * 10000) * 100
+                ).toFixed(2)}%
+              </Text>
+            </View>
+            <View style={styles.yieldItem}>
+              <Text style={styles.yieldLabel}>実質利回り</Text>
+              <Text style={[styles.yieldValue, styles.yieldValueNet]}>
+                {(((property.monthlyRent - (property.managementFee || 0) - (property.repairReserve || 0) - (property.otherMonthlyExpenses || 0)) * 12) / (property.price * 10000) * 100).toFixed(2)}%
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* 融資適格性バッジ */}
+        {loanPresets.length > 0 && (
+          <View style={styles.loanEligibilityRow}>
+            {loanPresets.map((preset) => {
+              const result = matchesLoanPreset(property, preset);
+              return (
+                <TouchableOpacity
+                  key={preset.id}
+                  style={[
+                    styles.loanEligibilityBadge,
+                    result.matches ? styles.loanEligible : styles.loanIneligible,
+                  ]}
+                  onPress={() => {
+                    if (!result.matches) {
+                      Alert.alert(
+                        `${preset.name}：不適合`,
+                        result.reasons.join("\n"),
+                        [{ text: "OK" }]
+                      );
+                    }
+                  }}
+                >
+                  <FontAwesome
+                    name={result.matches ? "check-circle" : "times-circle"}
+                    size={12}
+                    color={result.matches ? "#16A34A" : "#DC2626"}
+                  />
+                  <Text style={[
+                    styles.loanEligibilityText,
+                    { color: result.matches ? "#16A34A" : "#DC2626" },
+                  ]}>
+                    {preset.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
 
@@ -340,6 +588,64 @@ export default function PropertyDetailScreen() {
           </Text>
         )}
       </View>
+
+      {/* クイックインサイト（公的データ） */}
+      {reinfolibLoading && (
+        <View style={{ padding: 16, alignItems: "center" }}>
+          <ActivityIndicator size="small" color={theme.accent} />
+          <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>公的データ取得中...</Text>
+        </View>
+      )}
+      {!reinfolibLoading && reinfolibAreaInfo && (
+        <View style={{ marginHorizontal: 16, marginTop: 8, padding: 12, backgroundColor: theme.bgCard, borderRadius: 12, gap: 8 }}>
+          <Text style={{ fontSize: 13, fontWeight: "700", color: theme.text, marginBottom: 2 }}>
+            <FontAwesome name="database" size={12} color={theme.accent} />  公的データサマリー
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            {/* DID */}
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: (reinfolibAreaInfo.did || []).length > 0 ? "rgba(59,130,246,0.08)" : "rgba(255,193,7,0.08)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+              <FontAwesome name="users" size={11} color={(reinfolibAreaInfo.did || []).length > 0 ? "#3B82F6" : "#F59E0B"} />
+              <Text style={{ fontSize: 12, color: (reinfolibAreaInfo.did || []).length > 0 ? "#3B82F6" : "#F59E0B", marginLeft: 4, fontWeight: "600" }}>
+                {(reinfolibAreaInfo.did || []).length > 0 ? "DID区域内" : "DID区域外"}
+              </Text>
+            </View>
+            {/* 人口トレンド */}
+            {(reinfolibAreaInfo.future_population || []).length > 0 && reinfolibAreaInfo.future_population[0].trend && (
+              <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: reinfolibAreaInfo.future_population[0].trend === "growing" ? "rgba(76,175,80,0.08)" : reinfolibAreaInfo.future_population[0].trend === "declining" ? "rgba(244,67,54,0.08)" : "rgba(255,193,7,0.08)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                <FontAwesome name="line-chart" size={11} color={reinfolibAreaInfo.future_population[0].trend === "growing" ? "#4CAF50" : reinfolibAreaInfo.future_population[0].trend === "declining" ? "#F44336" : "#F59E0B"} />
+                <Text style={{ fontSize: 12, color: reinfolibAreaInfo.future_population[0].trend === "growing" ? "#4CAF50" : reinfolibAreaInfo.future_population[0].trend === "declining" ? "#F44336" : "#F59E0B", marginLeft: 4, fontWeight: "600" }}>
+                  人口{reinfolibAreaInfo.future_population[0].trend === "growing" ? "増加" : reinfolibAreaInfo.future_population[0].trend === "declining" ? "減少" : "横ばい"}
+                  {reinfolibAreaInfo.future_population[0].change_rate_2040 != null ? ` ${reinfolibAreaInfo.future_population[0].change_rate_2040 > 0 ? "+" : ""}${reinfolibAreaInfo.future_population[0].change_rate_2040}%` : ""}
+                </Text>
+              </View>
+            )}
+            {/* 洪水リスク */}
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: reinfolibAreaInfo.flood_risk.length > 0 ? "rgba(244,67,54,0.08)" : "rgba(76,175,80,0.08)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+              <FontAwesome name="tint" size={11} color={reinfolibAreaInfo.flood_risk.length > 0 ? "#F44336" : "#4CAF50"} />
+              <Text style={{ fontSize: 12, color: reinfolibAreaInfo.flood_risk.length > 0 ? "#F44336" : "#4CAF50", marginLeft: 4, fontWeight: "600" }}>
+                {reinfolibAreaInfo.flood_risk.length > 0 ? "浸水リスクあり" : "浸水想定外"}
+              </Text>
+            </View>
+            {/* 土砂災害 */}
+            <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: reinfolibAreaInfo.landslide_risk.length > 0 ? "rgba(244,67,54,0.08)" : "rgba(76,175,80,0.08)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+              <FontAwesome name="warning" size={11} color={reinfolibAreaInfo.landslide_risk.length > 0 ? "#F44336" : "#4CAF50"} />
+              <Text style={{ fontSize: 12, color: reinfolibAreaInfo.landslide_risk.length > 0 ? "#F44336" : "#4CAF50", marginLeft: 4, fontWeight: "600" }}>
+                {reinfolibAreaInfo.landslide_risk.length > 0 ? "土砂警戒区域" : "土砂警戒外"}
+              </Text>
+            </View>
+            {/* 用途地域 */}
+            {reinfolibAreaInfo.zoning.length > 0 && (
+              <View style={{ flexDirection: "row", alignItems: "center", backgroundColor: "rgba(6,182,212,0.08)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 }}>
+                <FontAwesome name="building" size={11} color="#06B6D4" />
+                <Text style={{ fontSize: 12, color: "#06B6D4", marginLeft: 4, fontWeight: "600" }}>
+                  {reinfolibAreaInfo.zoning[0].youto_name || reinfolibAreaInfo.zoning[0].youto || "用途地域"}
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={{ fontSize: 10, color: theme.textMuted }}>出典: 国土交通省 不動産情報ライブラリ</Text>
+        </View>
+      )}
 
       {/* Investment Status */}
       <View style={styles.statusRow}>
@@ -413,6 +719,13 @@ export default function PropertyDetailScreen() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
+          style={styles.actionButton}
+          onPress={handleShareProperty}
+        >
+          <FontAwesome name="share-alt" size={16} color={theme.text} />
+          <Text style={styles.actionText}>共有</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.actionButton, styles.deleteButton]}
           onPress={handleDelete}
         >
@@ -436,6 +749,7 @@ export default function PropertyDetailScreen() {
             router.push({
               pathname: "/(tabs)/simulation",
               params: {
+                property_id: property.id,
                 property_price: String((property.price || 0) * 10000),
                 monthly_rent: String(property.monthlyRent || 0),
                 management_fee: String(property.managementFee || 0),
@@ -452,6 +766,86 @@ export default function PropertyDetailScreen() {
           <FontAwesome name="calculator" size={18} color="#fff" />
           <Text style={styles.simulationButtonText}>収益シミュレーション</Text>
         </TouchableOpacity>
+      )}
+
+      {/* 保存済みシミュレーション */}
+      {savedSims.length > 0 && (
+        <View style={styles.savedSimsSection}>
+          <TouchableOpacity
+            style={styles.savedSimsHeader}
+            onPress={() => setSavedSimsExpanded(!savedSimsExpanded)}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <FontAwesome name="bookmark" size={16} color="#3B82F6" />
+              <Text style={styles.savedSimsTitle}>
+                保存済みシミュレーション ({savedSims.length})
+              </Text>
+            </View>
+            <FontAwesome
+              name={savedSimsExpanded ? "chevron-up" : "chevron-down"}
+              size={12}
+              color={theme.textSecondary}
+            />
+          </TouchableOpacity>
+          {savedSimsExpanded && savedSims.map((sim) => {
+            const monthlyCfColor = (sim.monthly_cf ?? 0) >= 0 ? theme.success : "#EF4444";
+            return (
+              <View key={sim.id} style={styles.savedSimCard}>
+                <View style={styles.savedSimRow}>
+                  <Text style={styles.savedSimLabel}>{sim.label}</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Alert.alert("削除確認", `「${sim.label}」を削除しますか？`, [
+                        { text: "キャンセル", style: "cancel" },
+                        {
+                          text: "削除",
+                          style: "destructive",
+                          onPress: async () => {
+                            try {
+                              await api.deleteSavedSimulation(sim.id);
+                              setSavedSims(savedSims.filter((s) => s.id !== sim.id));
+                            } catch {}
+                          },
+                        },
+                      ]);
+                    }}
+                  >
+                    <FontAwesome name="trash-o" size={14} color={theme.textMuted} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.savedSimMetrics}>
+                  <View style={styles.savedSimMetric}>
+                    <Text style={styles.savedSimMetricLabel}>金利</Text>
+                    <Text style={styles.savedSimMetricValue}>
+                      {sim.interest_rate != null ? `${(sim.interest_rate * 100).toFixed(2)}%` : "-"}
+                    </Text>
+                  </View>
+                  <View style={styles.savedSimMetric}>
+                    <Text style={styles.savedSimMetricLabel}>月額CF</Text>
+                    <Text style={[styles.savedSimMetricValue, { color: monthlyCfColor }]}>
+                      {sim.monthly_cf != null ? `¥${sim.monthly_cf.toLocaleString()}` : "-"}
+                    </Text>
+                  </View>
+                  <View style={styles.savedSimMetric}>
+                    <Text style={styles.savedSimMetricLabel}>実質利回り</Text>
+                    <Text style={styles.savedSimMetricValue}>
+                      {sim.net_yield != null ? `${Number(sim.net_yield).toFixed(2)}%` : "-"}
+                    </Text>
+                  </View>
+                  <View style={styles.savedSimMetric}>
+                    <Text style={styles.savedSimMetricLabel}>ROI</Text>
+                    <Text style={styles.savedSimMetricValue}>
+                      {sim.roi != null ? `${Number(sim.roi).toFixed(2)}%` : "-"}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.savedSimDate}>
+                  {new Date(sim.created_at).toLocaleDateString("ja-JP")}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
       )}
 
       {/* 相場比較ボタン */}
@@ -652,6 +1046,160 @@ export default function PropertyDetailScreen() {
             )}
           </View>
         </View>
+      )}
+
+      {/* 賃料相場分析 */}
+      {rentLoading && (
+        <View style={styles.analysisLoadingCard}>
+          <ActivityIndicator size="large" color="#10B981" />
+          <Text style={[styles.analysisLoadingTitle, { color: "#10B981" }]}>賃料相場を分析中...</Text>
+        </View>
+      )}
+      {rentAnalysis && !rentLoading && (
+        <TouchableOpacity
+          style={styles.fieldsCard}
+          onPress={() => setRentExpanded(!rentExpanded)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <FontAwesome name="yen" size={16} color="#10B981" />
+              <Text style={[styles.sectionTitle, { marginBottom: 0, color: "#10B981" }]}>賃料相場分析</Text>
+            </View>
+            <FontAwesome name={rentExpanded ? "chevron-up" : "chevron-down"} size={14} color={theme.textMuted} />
+          </View>
+
+          {/* サマリー（常に表示） */}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+            {rentAnalysis.current_rent != null && (
+              <View style={[styles.summaryMetricBox, { borderColor: "rgba(16, 185, 129, 0.2)" }]}>
+                <Text style={styles.summaryMetricLabel}>現在賃料</Text>
+                <Text style={[styles.summaryMetricValue, { color: "#10B981" }]}>
+                  {rentAnalysis.current_rent.toLocaleString()}円
+                </Text>
+              </View>
+            )}
+            {rentAnalysis.estimated_rent != null && (
+              <View style={[styles.summaryMetricBox, { borderColor: "rgba(16, 185, 129, 0.2)" }]}>
+                <Text style={styles.summaryMetricLabel}>推定適正賃料</Text>
+                <Text style={[styles.summaryMetricValue, { color: "#10B981" }]}>
+                  {rentAnalysis.estimated_rent.toLocaleString()}円
+                </Text>
+              </View>
+            )}
+            {rentAnalysis.assessment && (
+              <View style={[styles.summaryMetricBox, { borderColor: rentAnalysis.assessment === "割安" ? "rgba(34, 197, 94, 0.3)" : rentAnalysis.assessment === "割高" ? "rgba(239, 68, 68, 0.3)" : "rgba(16, 185, 129, 0.2)" }]}>
+                <Text style={styles.summaryMetricLabel}>判定</Text>
+                <Text style={[styles.summaryMetricValue, {
+                  color: rentAnalysis.assessment === "割安" ? "#22C55E" : rentAnalysis.assessment === "割高" ? "#EF4444" : "#10B981",
+                  fontSize: 14,
+                }]}>
+                  {rentAnalysis.assessment}
+                  {rentAnalysis.diff_pct != null ? ` (${rentAnalysis.diff_pct > 0 ? "+" : ""}${rentAnalysis.diff_pct}%)` : ""}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* 詳細（展開時） */}
+          {rentExpanded && (
+            <View style={{ marginTop: 12 }}>
+              {/* 推定レンジ */}
+              {rentAnalysis.estimated_range && (
+                <View style={{ marginBottom: 12, padding: 10, backgroundColor: "rgba(16,185,129,0.06)", borderRadius: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: "#10B981", marginBottom: 4 }}>推定賃料レンジ</Text>
+                  <Text style={{ fontSize: 13, color: theme.text }}>
+                    {rentAnalysis.estimated_range.low.toLocaleString()}円 〜 {rentAnalysis.estimated_range.high.toLocaleString()}円
+                  </Text>
+                  {rentAnalysis.current_rent_m2 != null && rentAnalysis.estimated_rent_m2 != null && (
+                    <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 4 }}>
+                      m²単価: 現在 {rentAnalysis.current_rent_m2.toLocaleString()}円 / 推定 {rentAnalysis.estimated_rent_m2.toLocaleString()}円
+                    </Text>
+                  )}
+                </View>
+              )}
+
+              {/* 利回り分析 */}
+              {rentAnalysis.yield_analysis && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text, marginBottom: 6 }}>現在の利回り</Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>表面利回り</Text>
+                      <Text style={{ fontSize: 14, fontWeight: "bold", color: "#22C55E" }}>{rentAnalysis.yield_analysis.gross_yield}%</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>実質利回り</Text>
+                      <Text style={{ fontSize: 14, fontWeight: "bold", color: "#3B82F6" }}>{rentAnalysis.yield_analysis.net_yield}%</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>年間手取り</Text>
+                      <Text style={{ fontSize: 14, fontWeight: "bold", color: theme.text }}>{(rentAnalysis.yield_analysis.annual_net_income / 10000).toFixed(1)}万</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* 推定賃料での利回り */}
+              {rentAnalysis.estimated_yield && rentAnalysis.yield_analysis && (
+                <View style={{ marginBottom: 12, padding: 10, backgroundColor: "rgba(255,255,255,0.03)", borderRadius: 8, borderWidth: 1, borderColor: "rgba(16,185,129,0.15)" }}>
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginBottom: 4 }}>推定適正賃料での利回り</Text>
+                  <Text style={{ fontSize: 13, color: theme.text }}>
+                    表面 {rentAnalysis.estimated_yield.gross_yield}% / 実質 {rentAnalysis.estimated_yield.net_yield}%
+                  </Text>
+                </View>
+              )}
+
+              {/* 比較物件統計 */}
+              {rentAnalysis.comparable_stats && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text, marginBottom: 6 }}>
+                    同エリア賃料統計（{rentAnalysis.comparable_stats.count}件）
+                  </Text>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>中央値/㎡</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "bold", color: theme.text }}>{rentAnalysis.comparable_stats.median_rent_m2.toLocaleString()}円</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>最低/㎡</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "bold", color: theme.text }}>{rentAnalysis.comparable_stats.min_rent_m2.toLocaleString()}円</Text>
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 6, padding: 8, alignItems: "center" }}>
+                      <Text style={{ fontSize: 9, color: theme.textMuted }}>最高/㎡</Text>
+                      <Text style={{ fontSize: 12, fontWeight: "bold", color: theme.text }}>{rentAnalysis.comparable_stats.max_rent_m2.toLocaleString()}円</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* 比較物件リスト */}
+              {rentAnalysis.comparables.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ fontSize: 12, fontWeight: "600", color: theme.text, marginBottom: 6 }}>比較物件</Text>
+                  {rentAnalysis.comparables.slice(0, 5).map((c, i) => (
+                    <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" }}>
+                      <Text style={{ fontSize: 11, color: theme.textMuted, flex: 1 }} numberOfLines={1}>{c.name}</Text>
+                      <Text style={{ fontSize: 11, color: theme.text, marginLeft: 8 }}>{c.rent_m2.toLocaleString()}円/㎡</Text>
+                      <Text style={{ fontSize: 11, color: theme.textMuted, marginLeft: 8 }}>{c.area}㎡</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* モデル入力 */}
+              <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 4 }}>
+                推定根拠: {[
+                  rentAnalysis.model_inputs.area ? `${rentAnalysis.model_inputs.area}㎡` : null,
+                  rentAnalysis.model_inputs.age_years != null ? `築${Math.round(rentAnalysis.model_inputs.age_years)}年` : null,
+                  rentAnalysis.model_inputs.walk_minutes != null ? `徒歩${rentAnalysis.model_inputs.walk_minutes}分` : null,
+                  rentAnalysis.model_inputs.structure,
+                  rentAnalysis.model_inputs.daily_passengers ? `乗降${rentAnalysis.model_inputs.daily_passengers.toLocaleString()}人/日` : null,
+                ].filter(Boolean).join(" / ")}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
       )}
 
       {/* 出口予測ボタン */}
@@ -897,6 +1445,798 @@ export default function PropertyDetailScreen() {
         </View>
       )}
 
+      {/* 公的取引データ（国土交通省 不動産情報ライブラリ） */}
+      {reinfolibLoading && (
+        <View style={styles.analysisLoadingCard}>
+          <ActivityIndicator size="large" color="#0891B2" />
+          <Text style={[styles.analysisLoadingTitle, { color: "#0891B2" }]}>公的取引データ取得中...</Text>
+          <Text style={styles.analysisLoadingDesc}>国土交通省 不動産情報ライブラリを照会しています</Text>
+        </View>
+      )}
+      {reinfolibData && !reinfolibLoading && (
+        <View style={[styles.analysisCard, { borderLeftColor: "#0891B2", borderLeftWidth: 3 }]}>
+          <TouchableOpacity style={styles.analysisTitleRow} onPress={() => setReinfolibExpanded(!reinfolibExpanded)}>
+            <FontAwesome name="bank" size={14} color="#0891B2" />
+            <Text style={[styles.analysisSectionTitle, { color: "#0891B2" }]}>
+              公的取引データ（{reinfolibData.count}件）
+            </Text>
+            <FontAwesome name={reinfolibExpanded ? "chevron-up" : "chevron-down"} size={12} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          {reinfolibExpanded && (
+            <View>
+              {/* この物件の㎡単価 vs 市場平均 */}
+              {property.price && property.area && property.area > 0 && (() => {
+                const myM2 = Math.round((property.price * 10000) / property.area / 10000);
+                const avgM2 = Math.round(reinfolibData.avg_price_m2 / 10000);
+                const diffPct = ((myM2 - avgM2) / avgM2) * 100;
+                const isBelow = diffPct < -5;
+                const isAbove = diffPct > 5;
+                return (
+                  <View style={[styles.priceCompareBox, { backgroundColor: isBelow ? "rgba(76,175,80,0.08)" : isAbove ? "rgba(244,67,54,0.08)" : "rgba(255,193,7,0.08)", borderRadius: 8, padding: 10, marginBottom: 6 }]}>
+                    <View style={styles.priceCompareItem}>
+                      <Text style={styles.priceCompareLabel}>この物件</Text>
+                      <Text style={[styles.priceCompareValue, { color: isBelow ? "#4CAF50" : isAbove ? "#F44336" : "#FFC107", fontWeight: "bold" }]}>{myM2.toLocaleString()}万円/㎡</Text>
+                    </View>
+                    <View style={[styles.priceCompareItem, { alignItems: "center" }]}>
+                      <Text style={{ color: theme.textMuted, fontSize: 11 }}>vs</Text>
+                      <Text style={{ color: isBelow ? "#4CAF50" : isAbove ? "#F44336" : "#FFC107", fontSize: 13, fontWeight: "bold" }}>{diffPct > 0 ? "+" : ""}{diffPct.toFixed(1)}%</Text>
+                    </View>
+                    <View style={styles.priceCompareItem}>
+                      <Text style={styles.priceCompareLabel}>市場平均</Text>
+                      <Text style={styles.priceCompareValue}>{avgM2.toLocaleString()}万円/㎡</Text>
+                    </View>
+                  </View>
+                );
+              })()}
+              {/* 単価サマリー */}
+              <View style={styles.priceCompareBox}>
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>平均㎡単価</Text>
+                  <Text style={styles.priceCompareValue}>{Math.round(reinfolibData.avg_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+                </View>
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>中央値</Text>
+                  <Text style={[styles.priceCompareValue, { color: theme.textSecondary }]}>{Math.round(reinfolibData.median_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+                </View>
+              </View>
+              <View style={styles.priceCompareBox}>
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>最安値</Text>
+                  <Text style={[styles.priceCompareValue, { fontSize: 13 }]}>{Math.round(reinfolibData.min_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+                </View>
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>最高値</Text>
+                  <Text style={[styles.priceCompareValue, { fontSize: 13 }]}>{Math.round(reinfolibData.max_price_m2 / 10000).toLocaleString()}万円/㎡</Text>
+                </View>
+                <View style={styles.priceCompareItem}>
+                  <Text style={styles.priceCompareLabel}>平均総額</Text>
+                  <Text style={[styles.priceCompareValue, { fontSize: 13 }]}>{Math.round(reinfolibData.avg_total_price / 10000).toLocaleString()}万円</Text>
+                </View>
+              </View>
+
+              {/* この物件との比較 */}
+              {property.price && property.area && property.area > 0 && (
+                (() => {
+                  const propertyM2 = (property.price * 10000) / property.area;
+                  const diffPct = ((propertyM2 - reinfolibData.avg_price_m2) / reinfolibData.avg_price_m2) * 100;
+                  const isBelow = diffPct < -5;
+                  const isAbove = diffPct > 5;
+                  return (
+                    <View style={[styles.assessmentBadge, {
+                      backgroundColor: isBelow ? "rgba(76,175,80,0.15)" : isAbove ? "rgba(244,67,54,0.15)" : "rgba(255,193,7,0.15)",
+                      marginVertical: 8,
+                    }]}>
+                      <Text style={[styles.assessmentText, {
+                        color: isBelow ? "#4CAF50" : isAbove ? "#F44336" : "#FFC107",
+                      }]}>
+                        この物件: {Math.round(propertyM2 / 10000).toLocaleString()}万円/㎡（公的データ平均比 {diffPct > 0 ? "+" : ""}{diffPct.toFixed(1)}%）
+                      </Text>
+                    </View>
+                  );
+                })()
+              )}
+
+              {/* 取引事例サンプル */}
+              {reinfolibData.samples.length > 0 && (
+                <View style={{ marginTop: 8 }}>
+                  <Text style={[styles.comparableHeader, { color: "#0891B2" }]}>直近の取引事例</Text>
+                  {reinfolibData.samples.slice(0, 5).map((s, i) => (
+                    <View key={i} style={styles.comparableRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.comparableName}>
+                          {s.district || s.municipality || "—"} {s.floor_plan || ""}
+                        </Text>
+                        <Text style={styles.comparableDetail}>
+                          {s.area}㎡ ・ {s.building_year ? `${s.building_year}年築` : "築年不明"} ・ {s.structure || ""}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={styles.comparablePrice}>
+                          {Math.round(s.total_price / 10000).toLocaleString()}万円
+                        </Text>
+                        <Text style={[styles.comparableDetail, { color: "#0891B2" }]}>
+                          {Math.round(s.unit_price / 10000).toLocaleString()}万円/㎡
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <Text style={[styles.dataSourceText, { marginTop: 8 }]}>
+                出典: {reinfolibData.source}（{reinfolibData.period}）
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ハザード・用途地域情報（国土交通省） */}
+      {reinfolibAreaInfo && (
+        <View style={[styles.analysisCard, { borderLeftColor: "#06B6D4", borderLeftWidth: 3 }]}>
+          <View style={styles.analysisTitleRow}>
+            <FontAwesome name="shield" size={14} color="#06B6D4" />
+            <Text style={[styles.analysisSectionTitle, { color: "#06B6D4" }]}>
+              ハザード・用途地域
+            </Text>
+          </View>
+
+          {/* 用途地域 */}
+          {reinfolibAreaInfo.zoning.length > 0 && (
+            <View style={{ marginBottom: 10 }}>
+              <Text style={[styles.comparableHeader, { color: "#06B6D4" }]}>用途地域</Text>
+              {reinfolibAreaInfo.zoning.slice(0, 3).map((z, i) => (
+                <View key={i} style={[styles.comparableRow, { flexDirection: "column", alignItems: "flex-start" }]}>
+                  <Text style={styles.comparableName}>{z.youto_name || z.youto || "—"}</Text>
+                  {(z.kenpei || z.youseki) && (
+                    <Text style={styles.comparableDetail}>
+                      {z.kenpei ? `建蔽率: ${z.kenpei}%` : ""}{z.kenpei && z.youseki ? " / " : ""}{z.youseki ? `容積率: ${z.youseki}%` : ""}
+                    </Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 洪水リスク */}
+          <View style={{ marginBottom: 10 }}>
+            <Text style={[styles.comparableHeader, { color: "#3B82F6" }]}>
+              <FontAwesome name="tint" size={11} color="#3B82F6" /> 洪水浸水想定
+            </Text>
+            {reinfolibAreaInfo.flood_risk.length > 0 ? (
+              reinfolibAreaInfo.flood_risk.slice(0, 3).map((f, i) => (
+                <View key={i} style={styles.comparableRow}>
+                  <Text style={[styles.comparableName, { color: "#F59E0B" }]}>
+                    {f.depth || f.rank || "浸水リスクあり"}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={[styles.comparableDetail, { color: "#4CAF50" }]}>浸水想定区域外</Text>
+            )}
+          </View>
+
+          {/* 土砂災害 */}
+          <View style={{ marginBottom: 10 }}>
+            <Text style={[styles.comparableHeader, { color: "#F97316" }]}>
+              <FontAwesome name="warning" size={11} color="#F97316" /> 土砂災害警戒
+            </Text>
+            {reinfolibAreaInfo.landslide_risk.length > 0 ? (
+              reinfolibAreaInfo.landslide_risk.slice(0, 3).map((l, i) => (
+                <View key={i} style={styles.comparableRow}>
+                  <Text style={[styles.comparableName, { color: "#F44336" }]}>
+                    {l.saigai_type || l.name || "警戒区域内"}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <Text style={[styles.comparableDetail, { color: "#4CAF50" }]}>警戒区域外</Text>
+            )}
+          </View>
+
+          {/* 地価公示 */}
+          {reinfolibAreaInfo.land_prices.length > 0 && (
+            <View style={{ marginBottom: 10 }}>
+              <Text style={[styles.comparableHeader, { color: "#8B5CF6" }]}>周辺地価公示</Text>
+              {reinfolibAreaInfo.land_prices.slice(0, 3).map((lp, i) => (
+                <View key={i} style={styles.comparableRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.comparableName} numberOfLines={1}>{lp.addr || lp.address || "—"}</Text>
+                    <Text style={styles.comparableDetail}>{lp.youto_name || lp.youto || ""}</Text>
+                  </View>
+                  <Text style={styles.comparablePrice}>
+                    {lp.price ? `${Number(lp.price).toLocaleString()}円/㎡` : "—"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* DID（人口集中地区）判定 */}
+          <View style={{ marginBottom: 10 }}>
+            <Text style={[styles.comparableHeader, { color: "#3B82F6" }]}>
+              <FontAwesome name="users" size={11} color="#3B82F6" /> 人口集中地区（DID）
+            </Text>
+            {(reinfolibAreaInfo.did || []).length > 0 ? (
+              <View style={{ padding: 8, backgroundColor: "rgba(59,130,246,0.06)", borderRadius: 6 }}>
+                <Text style={[styles.comparableName, { color: "#3B82F6" }]}>DID区域内 ✓</Text>
+                <Text style={styles.comparableDetail}>
+                  {reinfolibAreaInfo.did[0].municipality || ""}
+                  {reinfolibAreaInfo.did[0].population ? ` ・ 人口 ${reinfolibAreaInfo.did[0].population.toLocaleString()}人` : ""}
+                  {reinfolibAreaInfo.did[0].density ? ` ・ 密度 ${reinfolibAreaInfo.did[0].density.toLocaleString()}人/k㎡` : ""}
+                </Text>
+                {reinfolibAreaInfo.did[0].households && (
+                  <Text style={styles.comparableDetail}>世帯数: {reinfolibAreaInfo.did[0].households.toLocaleString()}</Text>
+                )}
+              </View>
+            ) : (
+              <View style={{ padding: 8, backgroundColor: "rgba(255,193,7,0.06)", borderRadius: 6 }}>
+                <Text style={[styles.comparableName, { color: "#F59E0B" }]}>DID区域外</Text>
+                <Text style={styles.comparableDetail}>人口集中地区に該当しません。賃貸需要や流動性に注意が必要です。</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 将来推計人口 */}
+          {(reinfolibAreaInfo.future_population || []).length > 0 && reinfolibAreaInfo.future_population[0].pop_2020 && (
+            <View style={{ marginBottom: 10 }}>
+              <Text style={[styles.comparableHeader, { color: "#10B981" }]}>
+                <FontAwesome name="line-chart" size={11} color="#10B981" /> 将来推計人口（250mメッシュ）
+              </Text>
+              <View style={{ padding: 8, backgroundColor: "rgba(16,185,129,0.06)", borderRadius: 6 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={styles.comparableDetail}>2020年: {reinfolibAreaInfo.future_population[0].pop_2020?.toLocaleString()}人</Text>
+                  <Text style={styles.comparableDetail}>2030年: {reinfolibAreaInfo.future_population[0].pop_2030?.toLocaleString() || "—"}人</Text>
+                  <Text style={styles.comparableDetail}>2040年: {reinfolibAreaInfo.future_population[0].pop_2040?.toLocaleString() || "—"}人</Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 2 }}>
+                  <Text style={styles.comparableDetail}>2050年: {reinfolibAreaInfo.future_population[0].pop_2050?.toLocaleString() || "—"}人</Text>
+                  <Text style={[styles.comparableName, {
+                    color: reinfolibAreaInfo.future_population[0].trend === "growing" ? "#4CAF50" :
+                           reinfolibAreaInfo.future_population[0].trend === "declining" ? "#F44336" : "#F59E0B",
+                    fontSize: 13,
+                  }]}>
+                    {reinfolibAreaInfo.future_population[0].trend === "growing" ? "↑ 人口増加" :
+                     reinfolibAreaInfo.future_population[0].trend === "declining" ? "↓ 人口減少" : "→ 横ばい"}
+                    {reinfolibAreaInfo.future_population[0].change_rate_2040 != null
+                      ? ` (${reinfolibAreaInfo.future_population[0].change_rate_2040 > 0 ? "+" : ""}${reinfolibAreaInfo.future_population[0].change_rate_2040}%)`
+                      : ""}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* 駅乗降客数 */}
+          {(reinfolibAreaInfo.stations || []).length > 0 && (() => {
+            // 駅名で重複除去（乗降客数があるレコードを優先）
+            const stMap = new Map<string, any>();
+            for (const s of reinfolibAreaInfo.stations) {
+              const rawName = (s.name || s.station_name || "").trim();
+              if (!rawName) continue;
+              const passengers = Number(s.daily_passengers || s.passengers || 0);
+              const existing = stMap.get(rawName);
+              if (!existing) {
+                stMap.set(rawName, s);
+              } else {
+                const existingPassengers = Number(existing.daily_passengers || existing.passengers || 0);
+                if (!existingPassengers && passengers) {
+                  stMap.set(rawName, s);
+                }
+              }
+            }
+            const uniqueStations = Array.from(stMap.values()).slice(0, 5);
+            return (
+            <View style={{ marginBottom: 10 }}>
+              <Text style={[styles.comparableHeader, { color: "#6366F1" }]}>
+                <FontAwesome name="train" size={11} color="#6366F1" /> 周辺駅乗降客数
+              </Text>
+              {uniqueStations.map((s: any, i: number) => (
+                <View key={i} style={styles.comparableRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.comparableName}>{s.name || s.station_name || "—"}</Text>
+                    <Text style={styles.comparableDetail}>
+                      {s.line_name || s.lines?.map((l: any) => l.line || l.name).join("・") || ""}
+                    </Text>
+                  </View>
+                  <Text style={styles.comparablePrice}>
+                    {s.daily_passengers ? `${Number(s.daily_passengers).toLocaleString()}人/日` :
+                     s.passengers ? `${Number(s.passengers).toLocaleString()}人/日` : "—"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            );
+          })()}
+
+          <Text style={styles.dataSourceText}>
+            出典: {reinfolibAreaInfo.source}
+          </Text>
+        </View>
+      )}
+
+      {/* エリアマップ */}
+      {reinfolibAreaInfo && (() => {
+        // 座標を取得（analysis結果 → reinfolibAreaInfo → 物件座標）
+        const coords = analysis?.reference_data?.search_coords
+          || reinfolibAreaInfo?.search_coords;
+        const mapLat = coords?.lat;
+        const mapLng = coords?.lng;
+        if (!mapLat || !mapLng) return null;
+
+        const didAreas = reinfolibAreaInfo.did || [];
+        const populationData = reinfolibAreaInfo.future_population || [];
+        const stationsData = reinfolibAreaInfo.stations || [];
+        const landPrices = reinfolibAreaInfo.land_prices || [];
+        const floodRisk = reinfolibAreaInfo.flood_risk || [];
+
+        return (
+          <View style={[styles.analysisCard, { borderLeftColor: "#3B82F6", borderLeftWidth: 3 }]}>
+            <View style={styles.analysisTitleRow}>
+              <FontAwesome name="map" size={14} color="#3B82F6" />
+              <Text style={[styles.analysisSectionTitle, { color: "#3B82F6" }]}>
+                エリアマップ
+              </Text>
+            </View>
+
+            <View style={styles.mapContainer}>
+              <MapView
+                style={styles.mapView}
+                initialRegion={{
+                  latitude: mapLat,
+                  longitude: mapLng,
+                  latitudeDelta: 0.015,
+                  longitudeDelta: 0.015,
+                }}
+                mapType="standard"
+                scrollEnabled={true}
+                zoomEnabled={true}
+                pitchEnabled={false}
+                rotateEnabled={false}
+              >
+                {/* 物件位置 */}
+                <Marker
+                  coordinate={{ latitude: mapLat, longitude: mapLng }}
+                  title={property.name || "この物件"}
+                  pinColor="#E8443A"
+                />
+
+                {/* DID範囲（半径500mの円で近似表示） */}
+                {didAreas.length > 0 && (
+                  <Circle
+                    center={{ latitude: mapLat, longitude: mapLng }}
+                    radius={500}
+                    fillColor="rgba(59, 130, 246, 0.08)"
+                    strokeColor="rgba(59, 130, 246, 0.3)"
+                    strokeWidth={1}
+                  />
+                )}
+
+                {/* 洪水リスクエリア */}
+                {floodRisk.length > 0 && (
+                  <Circle
+                    center={{ latitude: mapLat, longitude: mapLng }}
+                    radius={300}
+                    fillColor="rgba(59, 130, 246, 0.12)"
+                    strokeColor="rgba(59, 130, 246, 0.4)"
+                    strokeWidth={1}
+                  />
+                )}
+
+                {/* 地価公示ポイント */}
+                {landPrices.slice(0, 5).map((lp, i) => {
+                  const lpLat = lp.lat || lp.latitude;
+                  const lpLng = lp.lng || lp.longitude;
+                  if (!lpLat || !lpLng) return null;
+                  return (
+                    <Marker
+                      key={`lp-${i}`}
+                      coordinate={{ latitude: lpLat, longitude: lpLng }}
+                      title={`${lp.price ? Number(lp.price).toLocaleString() : "—"}円/㎡`}
+                      description={lp.addr || lp.address || ""}
+                      pinColor="#8B5CF6"
+                    />
+                  );
+                })}
+
+                {/* 駅マーカー */}
+                {stationsData.slice(0, 5).map((s, i) => {
+                  // 駅の座標はAPI結果に含まれない場合あり
+                  // feature geometryから取れる場合のみ表示
+                  return null; // 座標なしの場合はスキップ
+                })}
+              </MapView>
+            </View>
+
+            {/* マップ凡例 */}
+            <View style={styles.mapLegend}>
+              <View style={styles.mapLegendItem}>
+                <View style={[styles.mapLegendDot, { backgroundColor: "#E8443A" }]} />
+                <Text style={styles.mapLegendText}>物件</Text>
+              </View>
+              {didAreas.length > 0 && (
+                <View style={styles.mapLegendItem}>
+                  <View style={[styles.mapLegendDot, { backgroundColor: "rgba(59,130,246,0.3)" }]} />
+                  <Text style={styles.mapLegendText}>人口集中地区（DID）</Text>
+                </View>
+              )}
+              {landPrices.some((lp) => lp.lat || lp.latitude) && (
+                <View style={styles.mapLegendItem}>
+                  <View style={[styles.mapLegendDot, { backgroundColor: "#8B5CF6" }]} />
+                  <Text style={styles.mapLegendText}>地価公示</Text>
+                </View>
+              )}
+            </View>
+
+            {/* 人口密度・DIDサマリー */}
+            {didAreas.length > 0 && (
+              <View style={{ marginTop: 8, padding: 10, backgroundColor: "rgba(59,130,246,0.06)", borderRadius: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#3B82F6", marginBottom: 4 }}>
+                  人口集中地区（DID）内
+                </Text>
+                <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                  {didAreas[0].municipality || "—"} ・ 人口 {didAreas[0].population?.toLocaleString() || "—"}人
+                  {didAreas[0].density ? ` ・ 密度 ${didAreas[0].density.toLocaleString()}人/k㎡` : ""}
+                </Text>
+              </View>
+            )}
+            {didAreas.length === 0 && (
+              <View style={{ marginTop: 8, padding: 10, backgroundColor: "rgba(255,193,7,0.08)", borderRadius: 8 }}>
+                <Text style={{ fontSize: 12, color: "#F59E0B" }}>DID（人口集中地区）外</Text>
+              </View>
+            )}
+
+            {/* 将来推計人口（メッシュ） */}
+            {populationData.length > 0 && populationData[0].pop_2020 && (
+              <View style={{ marginTop: 8, padding: 10, backgroundColor: "rgba(16,185,129,0.06)", borderRadius: 8 }}>
+                <Text style={{ fontSize: 12, fontWeight: "600", color: "#10B981", marginBottom: 4 }}>
+                  250mメッシュ将来推計人口
+                </Text>
+                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                    2020年: {populationData[0].pop_2020?.toLocaleString()}人
+                  </Text>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>
+                    2040年: {populationData[0].pop_2040?.toLocaleString()}人
+                  </Text>
+                  <Text style={[{ fontSize: 11, fontWeight: "600" }, {
+                    color: populationData[0].trend === "growing" ? "#4CAF50" :
+                           populationData[0].trend === "declining" ? "#F44336" : "#F59E0B"
+                  }]}>
+                    {populationData[0].change_rate_2040 != null
+                      ? `${populationData[0].change_rate_2040 > 0 ? "+" : ""}${populationData[0].change_rate_2040}%`
+                      : ""}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <Text style={[styles.dataSourceText, { marginTop: 8 }]}>
+              出典: {reinfolibAreaInfo.source}
+            </Text>
+          </View>
+        );
+      })()}
+
+      {/* 標高・生活利便・統計データ */}
+      {reinfolibAreaInfo && (reinfolibAreaInfo.elevation || reinfolibAreaInfo.facilities || reinfolibAreaInfo.estat || (reinfolibAreaInfo.resas?.fiscal_strength || reinfolibAreaInfo.resas?.estate_transactions)) && (
+        <View style={styles.analysisCard}>
+          <View style={styles.analysisTitleRow}>
+            <FontAwesome name="bar-chart" size={14} color="#06B6D4" />
+            <Text style={[styles.analysisSectionTitle, { color: "#06B6D4" }]}>
+              エリア詳細データ
+            </Text>
+          </View>
+
+          {/* 標高 */}
+          {reinfolibAreaInfo.elevation?.elevation_m != null && (
+            <View style={{ backgroundColor: "rgba(6,182,212,0.08)", borderRadius: 8, padding: 10, marginTop: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <FontAwesome name="arrow-up" size={12} color="#06B6D4" />
+                <Text style={{ color: theme.text, fontSize: 13 }}>
+                  標高: <Text style={{ fontWeight: "bold" }}>{reinfolibAreaInfo.elevation.elevation_m.toFixed(1)}m</Text>
+                </Text>
+                {reinfolibAreaInfo.elevation.elevation_m < 5 && (
+                  <Text style={{ color: theme.accent, fontSize: 11 }}>低地注意</Text>
+                )}
+                {reinfolibAreaInfo.elevation.elevation_m >= 20 && (
+                  <Text style={{ color: "#4CAF50", fontSize: 11 }}>高台</Text>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* 生活利便施設 */}
+          {reinfolibAreaInfo.facilities && reinfolibAreaInfo.facilities.total > 0 && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "bold", marginBottom: 6 }}>
+                生活利便施設（半径{reinfolibAreaInfo.facilities.radius_m}m）
+              </Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {Object.entries(reinfolibAreaInfo.facilities.facilities).map(([key, cat]: [string, any]) => {
+                  if (!cat || cat.count === 0) return null;
+                  const colors: Record<string, string> = {
+                    convenience: "#4CAF50", supermarket: "#2196F3", drugstore: "#9C27B0",
+                    restaurant: "#FF9800", bank: "#607D8B", post_office: "#F44336",
+                    hospital: "#E91E63", school: "#3F51B5", park: "#8BC34A",
+                  };
+                  return (
+                    <View key={key} style={{
+                      backgroundColor: "rgba(255,255,255,0.05)", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4,
+                      borderLeftWidth: 3, borderLeftColor: colors[key] || "#666",
+                    }}>
+                      <Text style={{ color: theme.text, fontSize: 12 }}>
+                        {cat.label} <Text style={{ fontWeight: "bold", color: colors[key] || "#666" }}>{cat.count}</Text>
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              {/* 最寄り施設の詳細 */}
+              <View style={{ marginTop: 8 }}>
+                {Object.entries(reinfolibAreaInfo.facilities.facilities).map(([key, cat]: [string, any]) => {
+                  if (!cat || cat.count === 0 || !cat.items || cat.items.length === 0) return null;
+                  const nearest = cat.items[0];
+                  if (!nearest.name) return null;
+                  return (
+                    <Text key={key} style={{ color: theme.textSecondary, fontSize: 11, marginTop: 2 }}>
+                      {cat.label}: {nearest.name}（{nearest.distance_m}m）
+                    </Text>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* e-Stat データ */}
+          {reinfolibAreaInfo.estat && (
+            <View style={{ marginTop: 12 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {/* 空き家率 */}
+                {reinfolibAreaInfo.estat.vacancy_rate && (
+                  <View style={{
+                    backgroundColor: reinfolibAreaInfo.estat.vacancy_rate.rate > 15
+                      ? "rgba(239,68,68,0.1)" : reinfolibAreaInfo.estat.vacancy_rate.rate > 10
+                      ? "rgba(245,158,11,0.1)" : "rgba(74,222,128,0.1)",
+                    borderRadius: 8, padding: 10, flex: 1, minWidth: 140,
+                  }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>空き家率</Text>
+                    <Text style={{
+                      fontSize: 20, fontWeight: "bold",
+                      color: reinfolibAreaInfo.estat.vacancy_rate.rate > 15
+                        ? "#EF4444" : reinfolibAreaInfo.estat.vacancy_rate.rate > 10
+                        ? "#F59E0B" : "#4CAF50",
+                    }}>
+                      {reinfolibAreaInfo.estat.vacancy_rate.rate}%
+                    </Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 10 }}>
+                      ({reinfolibAreaInfo.estat.vacancy_rate.year}年)
+                    </Text>
+                  </View>
+                )}
+
+                {/* 転入転出 */}
+                {reinfolibAreaInfo.estat.migration && (
+                  <View style={{
+                    backgroundColor: reinfolibAreaInfo.estat.migration.net_migration > 0
+                      ? "rgba(74,222,128,0.1)" : "rgba(239,68,68,0.1)",
+                    borderRadius: 8, padding: 10, flex: 1, minWidth: 140,
+                  }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>人口移動</Text>
+                    <Text style={{
+                      fontSize: 16, fontWeight: "bold",
+                      color: reinfolibAreaInfo.estat.migration.net_migration > 0 ? "#4CAF50" : "#EF4444",
+                    }}>
+                      {reinfolibAreaInfo.estat.migration.trend}
+                    </Text>
+                    <Text style={{ color: theme.textSecondary, fontSize: 10 }}>
+                      純増減: {reinfolibAreaInfo.estat.migration.net_migration > 0 ? "+" : ""}{reinfolibAreaInfo.estat.migration.net_migration.toLocaleString()}人
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          {/* RESAS データ (RESAS API提供終了のため、実データがある場合のみ表示) */}
+          {reinfolibAreaInfo.resas && (reinfolibAreaInfo.resas.fiscal_strength || reinfolibAreaInfo.resas.estate_transactions) && (
+            <View style={{ marginTop: 8 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {/* 財政力指数 */}
+                {reinfolibAreaInfo.resas.fiscal_strength && (
+                  <View style={{
+                    backgroundColor: "rgba(96,165,250,0.1)", borderRadius: 8, padding: 10,
+                    flex: 1, minWidth: 140,
+                  }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>財政力指数</Text>
+                    <Text style={{ fontSize: 20, fontWeight: "bold", color: "#60A5FA" }}>
+                      {reinfolibAreaInfo.resas.fiscal_strength.index?.toFixed(2) ?? "—"}
+                    </Text>
+                    <Text style={{
+                      fontSize: 11, fontWeight: "bold",
+                      color: reinfolibAreaInfo.resas.fiscal_strength.rating === "優良" ? "#4CAF50"
+                        : reinfolibAreaInfo.resas.fiscal_strength.rating === "標準" ? "#F59E0B" : "#EF4444",
+                    }}>
+                      {reinfolibAreaInfo.resas.fiscal_strength.rating}
+                    </Text>
+                  </View>
+                )}
+
+                {/* 不動産取引 */}
+                {reinfolibAreaInfo.resas.estate_transactions && (
+                  <View style={{
+                    backgroundColor: "rgba(168,85,247,0.1)", borderRadius: 8, padding: 10,
+                    flex: 1, minWidth: 140,
+                  }}>
+                    <Text style={{ color: theme.textSecondary, fontSize: 11 }}>不動産取引</Text>
+                    <Text style={{
+                      fontSize: 16, fontWeight: "bold",
+                      color: reinfolibAreaInfo.resas.estate_transactions.trend === "活況" ? "#4CAF50" : "#F59E0B",
+                    }}>
+                      {reinfolibAreaInfo.resas.estate_transactions.trend}
+                    </Text>
+                    {reinfolibAreaInfo.resas.estate_transactions.data?.map((d: any, i: number) => (
+                      <Text key={i} style={{ color: theme.textSecondary, fontSize: 10 }}>
+                        {d.year}年: {d.value?.toLocaleString()}件
+                      </Text>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+          )}
+
+          <Text style={[styles.dataSourceText, { marginTop: 8 }]}>
+            出典: 国土地理院 / OpenStreetMap / e-Stat{reinfolibAreaInfo.resas && (reinfolibAreaInfo.resas.fiscal_strength || reinfolibAreaInfo.resas.estate_transactions) ? " / RESAS" : ""}
+          </Text>
+        </View>
+      )}
+
+      {/* コミュニティ比較データ */}
+      {(communityStats || communityComparables.length > 0 || communityLoading) && (
+        <View style={styles.analysisCard}>
+          <TouchableOpacity
+            style={styles.analysisTitleRow}
+            onPress={() => setCommunityExpanded(!communityExpanded)}
+          >
+            <FontAwesome name="users" size={14} color="#EC4899" />
+            <Text style={[styles.analysisSectionTitle, { color: "#EC4899", flex: 1 }]}>
+              コミュニティ比較データ
+            </Text>
+            {communityStats && (
+              <Text style={{ color: theme.textSecondary, fontSize: 12, marginRight: 8 }}>
+                {communityStats.total_properties}件登録
+              </Text>
+            )}
+            <FontAwesome
+              name={communityExpanded ? "chevron-up" : "chevron-down"}
+              size={12}
+              color={theme.textSecondary}
+            />
+          </TouchableOpacity>
+
+          {communityLoading && <ActivityIndicator style={{ marginTop: 8 }} />}
+
+          {communityExpanded && communityStats && (
+            <View style={{ marginTop: 12 }}>
+              {/* エリア相場統計 */}
+              {communityStats.price_stats && communityStats.price_stats.count > 0 && (
+                <View style={[styles.analysisCard, { backgroundColor: "rgba(236,72,153,0.08)", marginBottom: 8 }]}>
+                  <Text style={{ color: "#EC4899", fontWeight: "bold", fontSize: 13, marginBottom: 8 }}>
+                    {communityStats.station_name ? `${communityStats.station_name}駅周辺` : communityStats.city || "エリア"}の相場
+                  </Text>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <View style={{ alignItems: "center", flex: 1 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11 }}>平均価格</Text>
+                      <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 14 }}>
+                        {communityStats.price_stats.avg ? `${Math.round(communityStats.price_stats.avg / 10000).toLocaleString()}万円` : "—"}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "center", flex: 1 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11 }}>平均利回り</Text>
+                      <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 14 }}>
+                        {communityStats.yield_stats?.avg ? `${communityStats.yield_stats.avg.toFixed(1)}%` : "—"}
+                      </Text>
+                    </View>
+                    <View style={{ alignItems: "center", flex: 1 }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11 }}>平均面積</Text>
+                      <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 14 }}>
+                        {communityStats.area_stats?.avg ? `${communityStats.area_stats.avg.toFixed(1)}㎡` : "—"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* この物件との比較 */}
+                  {property.price && communityStats.price_stats.avg && (
+                    <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }}>
+                      <Text style={{ color: theme.textSecondary, fontSize: 11, marginBottom: 4 }}>この物件との比較</Text>
+                      {(() => {
+                        const priceDiff = ((property.price * 10000) / communityStats.price_stats.avg! - 1) * 100;
+                        return (
+                          <Text style={{ color: priceDiff > 0 ? theme.accent : "#4CAF50", fontSize: 13, fontWeight: "bold" }}>
+                            価格: 相場より{priceDiff > 0 ? `${priceDiff.toFixed(0)}%高い` : `${Math.abs(priceDiff).toFixed(0)}%安い`}
+                          </Text>
+                        );
+                      })()}
+                    </View>
+                  )}
+                </View>
+              )}
+
+              {/* 人気駅ランキング */}
+              {communityStats.station_ranking.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "bold", marginBottom: 4 }}>
+                    注目されている駅 TOP5
+                  </Text>
+                  {communityStats.station_ranking.slice(0, 5).map((s, i) => (
+                    <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 3 }}>
+                      <Text style={{ color: theme.text, fontSize: 12 }}>{i + 1}. {s.station}</Text>
+                      <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{s.count}件</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* 類似物件リスト */}
+              {communityComparables.length > 0 && (
+                <View>
+                  <Text style={{ color: theme.textSecondary, fontSize: 12, fontWeight: "bold", marginBottom: 6 }}>
+                    類似物件（コミュニティ登録）
+                  </Text>
+                  {communityComparables.slice(0, 5).map((c, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={{
+                        backgroundColor: theme.bgCard,
+                        borderRadius: 8,
+                        padding: 10,
+                        marginBottom: 6,
+                        borderLeftWidth: 3,
+                        borderLeftColor: "#EC4899",
+                      }}
+                      onPress={() => router.push(`/property/${c.id}`)}
+                    >
+                      <Text style={{ color: theme.text, fontWeight: "bold", fontSize: 13 }} numberOfLines={1}>
+                        {c.name || "物件名なし"}
+                      </Text>
+                      <View style={{ flexDirection: "row", marginTop: 4, flexWrap: "wrap", gap: 8 }}>
+                        {c.price != null && (
+                          <Text style={{ color: "#F59E0B", fontSize: 12, fontWeight: "bold" }}>
+                            {Math.round(c.price / 10000).toLocaleString()}万円
+                          </Text>
+                        )}
+                        {c.gross_yield != null && (
+                          <Text style={{ color: "#4CAF50", fontSize: 12 }}>
+                            利回り {c.gross_yield.toFixed(1)}%
+                          </Text>
+                        )}
+                        {c.area != null && (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{c.area.toFixed(1)}㎡</Text>
+                        )}
+                        {c.station_name && (
+                          <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{c.station_name}</Text>
+                        )}
+                      </View>
+                      {c.full_address && (
+                        <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+                          {c.full_address}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <Text style={[styles.dataSourceText, { marginTop: 6 }]}>
+                出典: マイソクDBコミュニティ（ユーザー登録物件の匿名統計）
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
       {/* 空室リスクシミュレーション */}
       {property.monthlyRent && property.price && property.price > 0 && (
         <View style={styles.analysisCard}>
@@ -962,6 +2302,146 @@ export default function PropertyDetailScreen() {
         </View>
       )}
 
+      {/* 修繕積立金の将来予測 */}
+      {property && property.repairReserve && property.repairReserve > 0 && property.builtDate && (
+        (() => {
+          const builtYearMatch = property.builtDate!.match(/(\d{4})/);
+          if (!builtYearMatch) return null;
+          const builtYear = parseInt(builtYearMatch[1]);
+          const currentYear = new Date().getFullYear();
+          const buildingAge = currentYear - builtYear;
+          const currentReserve = property.repairReserve!;
+
+          // 国交省ガイドライン基準の修繕積立金目安 (円/㎡/月)
+          // 階数・延床面積で異なるが、区分マンション標準で概算
+          const guidelinePerSqm = property.area
+            ? (property.area < 60 ? 335 : property.area < 80 ? 252 : 220)
+            : 252;
+          const guidelineAmount = property.area ? Math.round(guidelinePerSqm * property.area) : null;
+
+          // 修繕積立金は段階増額方式が一般的
+          // 築12年前後で1回目大規模修繕、以降12年周期
+          // 増額率: 築0-12年 → 基準、12-24年 → 1.5倍、24-36年 → 2.0倍、36年〜 → 2.5倍
+          const forecasts = [5, 10, 15, 20, 25, 30].map((yearsAhead) => {
+            const futureAge = buildingAge + yearsAhead;
+            let multiplier = 1.0;
+            if (futureAge >= 36) multiplier = 2.5;
+            else if (futureAge >= 24) multiplier = 2.0;
+            else if (futureAge >= 12) multiplier = 1.5;
+
+            // 現在の築年数に応じた現在の multiplier を算出
+            let currentMultiplier = 1.0;
+            if (buildingAge >= 36) currentMultiplier = 2.5;
+            else if (buildingAge >= 24) currentMultiplier = 2.0;
+            else if (buildingAge >= 12) currentMultiplier = 1.5;
+
+            const futureReserve = Math.round(currentReserve * (multiplier / currentMultiplier));
+            const annualImpact = (futureReserve - currentReserve) * 12;
+            return {
+              yearsAhead,
+              futureAge,
+              futureReserve,
+              multiplier,
+              annualImpact,
+            };
+          });
+
+          const nextMajorRepair = (() => {
+            const cycles = [12, 24, 36, 48];
+            for (const c of cycles) {
+              if (buildingAge < c) return c - buildingAge;
+            }
+            return null;
+          })();
+
+          return (
+            <View style={[styles.analysisCard, { borderColor: "rgba(249, 115, 22, 0.2)" }]}>
+              <View style={styles.analysisTitleRow}>
+                <FontAwesome name="wrench" size={14} color="#F97316" />
+                <Text style={[styles.analysisSectionTitle, { color: "#F97316" }]}>
+                  修繕積立金の将来予測
+                </Text>
+              </View>
+
+              {/* 現状 */}
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                <View style={[styles.summaryMetricBox, { borderColor: "rgba(249, 115, 22, 0.2)" }]}>
+                  <Text style={styles.summaryMetricLabel}>現在の積立金</Text>
+                  <Text style={[styles.summaryMetricValue, { color: "#F97316" }]}>
+                    ¥{currentReserve.toLocaleString()}/月
+                  </Text>
+                </View>
+                <View style={[styles.summaryMetricBox, { borderColor: "rgba(249, 115, 22, 0.2)" }]}>
+                  <Text style={styles.summaryMetricLabel}>築年数</Text>
+                  <Text style={[styles.summaryMetricValue, { color: "#F97316" }]}>
+                    {buildingAge}年
+                  </Text>
+                </View>
+                {nextMajorRepair && (
+                  <View style={[styles.summaryMetricBox, { borderColor: "rgba(249, 115, 22, 0.2)" }]}>
+                    <Text style={styles.summaryMetricLabel}>次回大規模修繕</Text>
+                    <Text style={[styles.summaryMetricValue, { color: "#F97316" }]}>
+                      約{nextMajorRepair}年後
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* ガイドライン比較 */}
+              {guidelineAmount && (
+                <View style={{
+                  backgroundColor: "rgba(249, 115, 22, 0.05)",
+                  borderRadius: 8,
+                  padding: 10,
+                  marginBottom: 10,
+                  borderLeftWidth: 3,
+                  borderLeftColor: "#F97316",
+                }}>
+                  <Text style={{ fontSize: 11, color: theme.textSecondary, lineHeight: 17 }}>
+                    国交省ガイドライン目安: ¥{guidelineAmount.toLocaleString()}/月
+                    （{guidelinePerSqm}円/㎡）
+                    {currentReserve < guidelineAmount * 0.7
+                      ? " → 現在の積立金は目安を大幅に下回っています。将来の増額リスクが高いです。"
+                      : currentReserve < guidelineAmount
+                      ? " → やや低めです。今後の増額に注意してください。"
+                      : " → 適正水準です。"}
+                  </Text>
+                </View>
+              )}
+
+              {/* 予測テーブル */}
+              <View style={styles.vacancyTable}>
+                <View style={[styles.vacancyHeaderRow, { backgroundColor: "rgba(249, 115, 22, 0.1)" }]}>
+                  <Text style={[styles.vacancyHeaderCell, { color: "#F97316" }]}>年後</Text>
+                  <Text style={[styles.vacancyHeaderCell, { color: "#F97316" }]}>築年数</Text>
+                  <Text style={[styles.vacancyHeaderCell, { color: "#F97316" }]}>予測額/月</Text>
+                  <Text style={[styles.vacancyHeaderCell, { color: "#F97316" }]}>年間増額</Text>
+                </View>
+                {forecasts.map((f, i) => {
+                  const isIncrease = f.futureReserve > currentReserve;
+                  return (
+                    <View key={f.yearsAhead} style={[styles.vacancyRow, i === 0 && styles.vacancyRowBase]}>
+                      <Text style={styles.vacancyCell}>{f.yearsAhead}年後</Text>
+                      <Text style={styles.vacancyCell}>築{f.futureAge}年</Text>
+                      <Text style={[styles.vacancyCell, isIncrease && { color: "#F97316", fontWeight: "bold" }]}>
+                        ¥{f.futureReserve.toLocaleString()}
+                      </Text>
+                      <Text style={[styles.vacancyCell, f.annualImpact > 0 && { color: "#EF4444" }]}>
+                        {f.annualImpact > 0 ? `+¥${f.annualImpact.toLocaleString()}` : "±0"}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.analysisDisclaimer}>
+                * 段階増額方式（12年周期）の一般的なモデルに基づく概算。管理組合の修繕計画により異なります。
+              </Text>
+            </View>
+          );
+        })()
+      )}
+
       {/* AI分析ボタン / ローディング表示 */}
       {analysisLoading ? (
         <View style={styles.analysisLoadingCard}>
@@ -972,15 +2452,22 @@ export default function PropertyDetailScreen() {
           </Text>
         </View>
       ) : (
-        <TouchableOpacity
-          style={styles.analysisButton}
-          onPress={handleAnalysis}
-        >
-          <FontAwesome name="bar-chart" size={18} color={theme.accent} />
-          <Text style={styles.analysisButtonText}>
-            {analysis ? "AI投資分析を再実行" : "AI投資分析"}
-          </Text>
-        </TouchableOpacity>
+        <View>
+          <TouchableOpacity
+            style={styles.analysisButton}
+            onPress={handleAnalysis}
+          >
+            <FontAwesome name={analysis ? "refresh" : "bar-chart"} size={18} color={theme.accent} />
+            <Text style={styles.analysisButtonText}>
+              {analysis ? "AI投資分析を再実行" : "AI投資分析を実行"}
+            </Text>
+          </TouchableOpacity>
+          {analysisDate && (
+            <Text style={{ textAlign: "center", fontSize: 10, color: theme.textMuted, marginTop: -4, marginBottom: 8 }}>
+              前回分析: {new Date(analysisDate).toLocaleDateString("ja-JP")}
+            </Text>
+          )}
+        </View>
       )}
 
       {/* AI分析結果 */}
@@ -1201,6 +2688,69 @@ export default function PropertyDetailScreen() {
         </View>
       )}
 
+      {/* 物件スコア (100点満点) */}
+      {scoreLoading && (
+        <View style={styles.fieldsCard}>
+          <ActivityIndicator color={theme.accent} />
+          <Text style={[styles.analysisLoadingDesc, { marginTop: 8 }]}>スコアを算出中...</Text>
+        </View>
+      )}
+      {propertyScore && !scoreLoading && (
+        <View style={styles.fieldsCard}>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+            <FontAwesome name="star" size={18} color="#F59E0B" />
+            <Text style={[styles.sectionTitle, { marginLeft: 8, marginBottom: 0 }]}>
+              投資スコア
+            </Text>
+          </View>
+
+          {/* 総合スコア + ランク */}
+          <View style={{ alignItems: "center", marginBottom: 16 }}>
+            <View style={styles.scoreTotalCircle}>
+              <Text style={styles.scoreTotalNumber}>{Math.round(propertyScore.total)}</Text>
+              <Text style={styles.scoreTotalMax}>/100</Text>
+            </View>
+            <View style={[styles.scoreRankBadge, {
+              backgroundColor: propertyScore.rank === "S" ? "#F59E0B" :
+                propertyScore.rank === "A" ? "#22C55E" :
+                propertyScore.rank === "B" ? "#3B82F6" :
+                propertyScore.rank === "C" ? "#F97316" : "#EF4444"
+            }]}>
+              <Text style={styles.scoreRankText}>ランク {propertyScore.rank}</Text>
+            </View>
+            <Text style={styles.scoreComment}>{propertyScore.comment}</Text>
+          </View>
+
+          {/* カテゴリ別バー */}
+          {(["profitability", "location", "asset_quality", "growth"] as const).map((catKey) => {
+            const cat = propertyScore.categories[catKey];
+            const pct = (cat.score / cat.max) * 100;
+            const barColor = catKey === "profitability" ? "#22C55E" :
+              catKey === "location" ? "#3B82F6" :
+              catKey === "asset_quality" ? "#8B5CF6" : "#F59E0B";
+            return (
+              <View key={catKey} style={{ marginBottom: 10 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={{ fontSize: 13, fontWeight: "600", color: theme.text }}>{cat.label}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: "bold", color: barColor }}>{cat.score}/{cat.max}</Text>
+                </View>
+                <View style={{ height: 8, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 4 }}>
+                  <View style={{ height: 8, width: `${pct}%`, backgroundColor: barColor, borderRadius: 4 }} />
+                </View>
+                {/* 内訳 */}
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                  {cat.details.map((d, i) => (
+                    <Text key={i} style={{ fontSize: 10, color: theme.textMuted }}>
+                      {d.item}: {d.value} ({d.score}/{d.max})
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* Detail Fields */}
       <View style={styles.fieldsCard}>
         {FIELD_CONFIG.map(({ key, label }) => (
@@ -1314,6 +2864,34 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: theme.accent,
     marginBottom: 10,
+  },
+  loanEligibilityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  loanEligibilityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  loanEligible: {
+    backgroundColor: "rgba(22, 163, 74, 0.1)",
+    borderColor: "rgba(22, 163, 74, 0.3)",
+  },
+  loanIneligible: {
+    backgroundColor: "rgba(220, 38, 38, 0.08)",
+    borderColor: "rgba(220, 38, 38, 0.2)",
+  },
+  loanEligibilityText: {
+    fontSize: 11,
+    fontWeight: "600",
   },
   headerBadges: {
     flexDirection: "row",
@@ -1991,6 +3569,63 @@ const styles = StyleSheet.create({
     color: theme.textMuted,
     lineHeight: 14,
   },
+  mapContainer: {
+    borderRadius: 12,
+    overflow: "hidden",
+    marginTop: 8,
+  },
+  mapView: {
+    width: "100%",
+    height: 240,
+  },
+  mapLegend: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 10,
+  },
+  mapLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  mapLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  mapLegendText: {
+    fontSize: 10,
+    color: theme.textMuted,
+  },
+  comparableHeader: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+    marginBottom: 6,
+  },
+  comparableRow: {
+    flexDirection: "row" as const,
+    justifyContent: "space-between" as const,
+    alignItems: "center" as const,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  comparableName: {
+    fontSize: 12,
+    color: theme.text,
+    fontWeight: "500" as const,
+  },
+  comparableDetail: {
+    fontSize: 10,
+    color: theme.textMuted,
+    marginTop: 1,
+  },
+  comparablePrice: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+    color: theme.text,
+  },
   // フィールド
   fieldsCard: {
     backgroundColor: theme.bgCard,
@@ -2044,4 +3679,130 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   saveText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  // 保存済みシミュレーション
+  savedSimsSection: {
+    backgroundColor: theme.bgCard,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.2)",
+    overflow: "hidden",
+  },
+  savedSimsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: 14,
+  },
+  savedSimsTitle: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#3B82F6",
+  },
+  savedSimCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.border,
+  },
+  savedSimRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  savedSimLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: theme.text,
+    flex: 1,
+  },
+  savedSimMetrics: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  savedSimMetric: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 6,
+    padding: 6,
+    alignItems: "center",
+  },
+  savedSimMetricLabel: {
+    fontSize: 9,
+    color: theme.textMuted,
+    marginBottom: 2,
+  },
+  savedSimMetricValue: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: theme.text,
+  },
+  savedSimDate: {
+    fontSize: 10,
+    color: theme.textMuted,
+    marginTop: 4,
+    textAlign: "right",
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.text,
+    marginBottom: 12,
+  },
+  scoreTotalCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    borderColor: "#F59E0B",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  scoreTotalNumber: {
+    fontSize: 36,
+    fontWeight: "bold",
+    color: "#F59E0B",
+  },
+  scoreTotalMax: {
+    fontSize: 14,
+    color: theme.textMuted,
+    marginTop: -4,
+  },
+  scoreRankBadge: {
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  scoreRankText: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#FFFFFF",
+  },
+  scoreComment: {
+    fontSize: 12,
+    color: theme.textMuted,
+    textAlign: "center",
+    lineHeight: 18,
+  },
+  summaryMetricBox: {
+    flex: 1,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 10,
+    alignItems: "center",
+  },
+  summaryMetricLabel: {
+    fontSize: 10,
+    color: theme.textMuted,
+    marginBottom: 4,
+  },
+  summaryMetricValue: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: theme.text,
+  },
 });

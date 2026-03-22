@@ -88,7 +88,21 @@ export default function CompareScreen() {
   async function fetchProperties() {
     try {
       const res = await api.getProperties();
-      setProperties(res.properties);
+      // リストAPIはnotes不足のため、詳細APIで補完
+      const detailed = await Promise.all(
+        res.properties.map(async (p) => {
+          if (p.grossYield == null || p.pricePerM2 == null) {
+            try {
+              const detail = await api.getProperty(p.id);
+              return detail.property;
+            } catch {
+              return p;
+            }
+          }
+          return p;
+        })
+      );
+      setProperties(detailed);
     } catch {
       // ignore
     } finally {

@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { TouchableOpacity } from "react-native";
 import { AuthProvider } from "@/lib/auth-context";
+import { SubscriptionProvider } from "@/lib/subscription-context";
 import { theme } from "@/constants/Colors";
 
 export { ErrorBoundary } from "expo-router";
@@ -38,6 +39,7 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
+      <SubscriptionProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -51,6 +53,10 @@ export default function RootLayout() {
         <Stack.Screen
           name="auth"
           options={{ headerShown: false, presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="paywall"
+          options={{ title: "MaisokuDB Pro", presentation: "modal" }}
         />
         <Stack.Screen
           name="property/[id]"
@@ -67,6 +73,7 @@ export default function RootLayout() {
           }}
         />
       </Stack>
+      </SubscriptionProvider>
     </AuthProvider>
   );
 }
