@@ -257,13 +257,9 @@ export default function HomeScreen() {
               ) : null;
             })()}
             <Text style={[styles.cardName, { flex: 1 }]} numberOfLines={1}>
-              {item.name && item.name !== "無題の物件"
+              {item.name && item.name !== "無題の物件" && item.name !== "物件"
                 ? item.name
-                : item.nearestStation
-                ? `${item.nearestStation}駅 ${item.layout || ""} ${item.price ? item.price + "万円" : ""}`.trim()
-                : item.city
-                ? `${item.city} ${item.layout || ""}`.trim()
-                : "物件詳細を確認"}
+                : [item.nearestStation ? `${item.nearestStation}駅` : "", item.layout || "", item.structure || ""].filter(Boolean).join(" ") || item.city || "物件詳細を確認"}
             </Text>
           </View>
           <TouchableOpacity

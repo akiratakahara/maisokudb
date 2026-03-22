@@ -188,9 +188,17 @@ function mapToBackendCreate(body: Partial<Property>): Record<string, unknown> {
   const balconyArea = toNum(body.balconyArea);
   const walkMinutes = toNum(body.walkMinutes);
 
-  // 物件名: 空なら住所・駅名からフォールバック生成
-  const fallbackName = body.address || (body.nearestStation ? `${body.nearestStation}周辺` : "") || body.city || "無題の物件";
-  const name = body.name || fallbackName;
+  // 物件名: 空なら駅名・間取り・住所から生成
+  let name = body.name && body.name.trim() ? body.name.trim() : "";
+  if (!name) {
+    const parts: string[] = [];
+    if (body.nearestStation) parts.push(`${body.nearestStation}駅`);
+    if (body.layout) parts.push(body.layout);
+    if (body.structure) parts.push(body.structure);
+    if (parts.length === 0 && body.city) parts.push(body.city);
+    if (parts.length === 0 && body.address) parts.push(body.address);
+    name = parts.join(" ") || "物件";
+  }
 
   // notes: undefinedだとJSON.stringifyで消えるのでnullを使用
   const n = (v: unknown) => v !== undefined && v !== null && v !== "" ? v : null;
