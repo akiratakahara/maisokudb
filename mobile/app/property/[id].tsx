@@ -709,8 +709,9 @@ export default function PropertyDetailScreen() {
               onPress={async () => {
                 const newStatus = active ? null : s.key;
                 try {
-                  await api.updateProperty(id, { investmentStatus: newStatus } as any);
-                  setProperty({ ...property, investmentStatus: newStatus } as Property);
+                  const updated = { ...property, investmentStatus: newStatus } as Property;
+                  await api.updateProperty(id, updated);
+                  setProperty(updated);
                 } catch {}
               }}
             >
